@@ -1,10 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
+import { createSimulationWorker } from 'simulation';
+
 import './App.css'
 
 function App() {
   const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    const worker = createSimulationWorker()
+    worker.onmessage = (e) => {
+      console.log('Result:', e.data);
+    }
+    const input = {test : 5}
+    worker.postMessage(input)
+  })
 
   return (
     <>
