@@ -1,17 +1,26 @@
 package main
 
 import (
+	"context"
 	"eclab/db"
+	"eclab/db/repositery"
 	"eclab/env"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/mail"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 )
 
-const PORT = ":8080"
+var Env env.Env
+var DB db.DB
 
 func main() {
 	godotenv.Load()
@@ -22,19 +31,197 @@ func main() {
 		return
 	}
 
-	DB, err := db.New(Env.DATABASE_URL)
+	DB, err = db.New(Env.DATABASE_URL)
 	if err != nil {
 		log.Fatal("Failed to connect to database: ", err)
 		return
 	}
 	defer DB.Close()
-	 
+
 	router := chi.NewRouter()
 
-	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "Hello World")
+	type AuthRequest struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	router.Post("/auth/register", func(w http.ResponseWriter, r *http.Request) {
+		var request AuthRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		email, err := validateEmail(request.Email)
+		if err != nil {
+			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			return
+		}
+
+		password, err := validatePassword(request.Password)
+		if err != nil {
+			http.Error(w, "Invalid password", http.StatusBadRequest)
+			return
+		}
+
+		cookie, err := register(r.Context(), email, password)
+		if err != nil {
+			http.Error(w, "Failed to register user", http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Set-Cookie", cookie.String())
+		w.WriteHeader(http.StatusOK)
 	})
 
-	fmt.Printf("Starting server on port %s\n", PORT)
+	router.Post("/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		var request AuthRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		email, err := validateEmail(request.Email)
+		if err != nil {
+			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			return
+		}
+
+		password, err := validatePassword(request.Password)
+		if err != nil {
+			http.Error(w, "Invalid password", http.StatusBadRequest)
+			return
+		}
+
+		cookie, err := login(r.Context(), email, password)
+		if err != nil {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Set-Cookie", cookie.String())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	router.Delete("/auth", func(w http.ResponseWriter, r *http.Request) {
+		session, err := getSessionFromRequest(r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		cookie, err := logout(r.Context(), *session)
+		if err != nil {
+			http.Error(w, "Failed to logout", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Set-Cookie", cookie.String())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	fmt.Printf("Starting server on port %s\n", Env.PORT)
 	http.ListenAndServe(Env.PORT, router)
+}
+
+func register(ctx context.Context, email string, password string) (*http.Cookie, error) {
+	hashedPassword, err := hashPassword(password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash password")
+	}
+
+	_, err = DB.CreateUser(ctx, repositery.CreateUserParams{
+		Email:        email,
+		PasswordHash: hashedPassword,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user")
+	}
+
+	cookie, err := login(ctx, email, password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to login after registration")
+	}
+
+	return cookie, nil
+}
+
+func login(ctx context.Context, email string, password string) (*http.Cookie, error) {
+	user, err := DB.GetUserByEmail(ctx, email)
+	if err != nil {
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
+	if !comparePasswords(password, user.PasswordHash) {
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
+	session, err := DB.CreateSession(ctx, repositery.CreateSessionParams{
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session")
+	}
+
+	return createAuthCookie(session.ID.String(), session.ExpiresAt), nil
+}
+
+func logout(ctx context.Context, session repositery.Session) (*http.Cookie, error) {
+	err := DB.DeleteSessionByID(ctx, session.ID)
+	cookie := createAuthCookie("", time.Now().Add(-time.Hour))
+
+	return cookie, err
+}
+
+func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
+	return &http.Cookie{
+		Name:     "session_id",
+		Value:    value,
+		Expires:  expiresAt,
+		HttpOnly: true,
+		Secure:   true,
+	}
+}
+
+func hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+func comparePasswords(password string, hashedPassword string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	return err == nil
+}
+
+func validateEmail(email string) (string, error) {
+	_, err := mail.ParseAddress(email)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(strings.ToLower(email)), nil
+}
+
+func validatePassword(password string) (string, error) {
+	if len(password) < 8 {
+		return "", fmt.Errorf("password must be at least 8 characters long")
+	}
+	return strings.TrimSpace(password), nil
+}
+
+func getSessionFromRequest(r *http.Request) (*repositery.Session, error) {
+	cookie, err := r.Cookie("session_id")
+	if err != nil {
+		return nil, fmt.Errorf("session cookie not found")
+	}
+
+	sessionID, err := uuid.Parse(cookie.Value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid session ID")
+	}
+	session, err := DB.GetSessionByID(r.Context(), sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid session")
+	}
+	return &session, nil
 }

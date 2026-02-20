@@ -5,12 +5,21 @@
 package repositery
 
 import (
-	"github.com/jackc/pgx/v5/pgtype"
+	"time"
+
+	"github.com/google/uuid"
 )
 
+type Session struct {
+	ID        uuid.UUID  `json:"id"`
+	UserID    int64      `json:"user_id"`
+	CreatedAt *time.Time `json:"created_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+}
+
 type User struct {
-	ID           int32            `json:"id"`
-	Email        string           `json:"email"`
-	PasswordHash string           `json:"password_hash"`
-	CreatedAt    pgtype.Timestamp `json:"created_at"`
+	ID           int64      `json:"id"`
+	Email        string     `json:"email"`
+	PasswordHash string     `json:"password_hash"`
+	CreatedAt    *time.Time `json:"created_at"`
 }
