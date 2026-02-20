@@ -1,22 +1,33 @@
-import { useEffect, useState } from 'react'
-import { NavLink } from 'react-router'
-import { createSimulationWorker } from 'simulation';
+import Canvas from "../components/Canvas";
+import "./Application.css";
 
 function Application() {
-  const [count, setCount] = useState(0)
-
-  useEffect(() => {
-    const worker = createSimulationWorker()
-    worker.onmessage = (e) => {
-      console.log('Result:', e.data);
-    }
-    const input = {test : 5}
-    worker.postMessage(input)
-  })
-
   return (
-<>ECLAB APPLICATION</>
-  )
+    <div className="application-container">      
+        
+        <Canvas />
+        
+
+        <div className="overlay-container">
+            <div className="component-menu">
+                {Array.from({ length: 50 }).map((_, i) => (
+                    <p key={i}>Line {i}</p>
+                ))}
+            </div>
+            <div className="quickAction-container">
+                <div className="quickAction-menu">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                            <p key={i}>Line {i}</p>
+                            ))}
+                </div>
+            </div>
+        </div> 
+
+
+        
+    </div>
+
+  );
 }
 
-export default Application
+export default Application;
