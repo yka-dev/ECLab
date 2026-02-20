@@ -15,7 +15,7 @@ function Application() {
   })
 
   return (
-<>Application</>
+<>ECLAB APPLICATION</>
   )
 }
 
