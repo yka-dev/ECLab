@@ -57,3 +57,14 @@ WHERE p.id = $2
   AND pm.project_id = p.id
   AND pm.user_id = $3
   AND pm.role = 'owner';
+
+
+-- name: UpdateProjectCircuitByID :exec
+UPDATE projects p
+SET circuit = $1,
+    updated_at = NOW()
+FROM project_members pm
+WHERE p.id = $2
+  AND pm.project_id = p.id
+    AND pm.user_id = $3
+    AND (pm.role = 'owner' OR pm.role = 'editor');

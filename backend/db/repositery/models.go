@@ -59,6 +59,7 @@ func (ns NullProjectRole) Value() (driver.Value, error) {
 type Project struct {
 	ID        int64            `json:"id"`
 	Name      string           `json:"name"`
+	Circuit   []byte           `json:"circuit"`
 	CreatedAt pgtype.Timestamp `json:"created_at"`
 	UpdatedAt pgtype.Timestamp `json:"updated_at"`
 }

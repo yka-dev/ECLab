@@ -108,15 +108,14 @@ func main() {
 		}
 	})
 
-	router.HandleFunc("/project/", func(w http.ResponseWriter, r *http.Request) {
+	router.Post("/project", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		switch r.Method {
-		case http.MethodPost:
+
 			var newProjectData struct {
 				Name string `json:"name"`
 			}
@@ -138,14 +137,37 @@ func main() {
 
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(project)
-		case http.MethodDelete:
-			idStr := strings.TrimPrefix(r.URL.Path, "/project/")
-			projectID, err := strconv.ParseInt(idStr, 10, 64)
+	})
+
+	router.HandleFunc("/project/{id}", func(w http.ResponseWriter, r *http.Request) {
+		session, err := getSessionFromRequest(r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		idStr := chi.URLParam(r, "id")
+		projectID, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid project id", http.StatusBadRequest)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			project, err := DB.GetProjectByID(r.Context(), repositery.GetProjectByIDParams{
+				ID:     projectID,
+				UserID: session.UserID,
+			})
+
 			if err != nil {
-				http.Error(w, "Invalid project id", http.StatusBadRequest)
+				http.Error(w, "Failed to get project", http.StatusInternalServerError)
 				return
 			}
 
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(project)
+		case http.MethodDelete:
 			err = DB.DeleteProjectByID(r.Context(), repositery.DeleteProjectByIDParams{
 				ID:     projectID,
 				UserID: session.UserID,
@@ -165,14 +187,7 @@ func main() {
 				http.Error(w, "Invalid request payload", http.StatusBadRequest)
 				return
 			}
-
-			idStr := strings.TrimPrefix(r.URL.Path, "/project/")
-			projectID, err := strconv.ParseInt(idStr, 10, 64)
-			if err != nil {
-				http.Error(w, "Invalid project id", http.StatusBadRequest)
-				return
-			}
-
+			
 			err = DB.UpdateProjectByID(r.Context(), repositery.UpdateProjectByIDParams{
 				ID:     projectID,
 				Name:   updateProjectData.Name,
@@ -185,10 +200,47 @@ func main() {
 			}
 
 			w.WriteHeader(http.StatusOK)
-
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+
+	})
+
+	router.Patch("/project/circuit/{id}", func (w http.ResponseWriter, r * http.Request) {
+		session, err := getSessionFromRequest(r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var updateProjectCircuitData struct {
+			Circuit []byte `json:"circuit"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&updateProjectCircuitData); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		idStr := strings.TrimPrefix(r.URL.Path, "/project/circuit/")
+		projectID, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid project id", http.StatusBadRequest)
+			return
+		}
+
+		err = DB.UpdateProjectCircuitByID(r.Context(), repositery.UpdateProjectCircuitByIDParams{
+			ID:      projectID,
+			Circuit: updateProjectCircuitData.Circuit,
+			UserID:  session.UserID,
+		})
+
+		if err != nil {
+			http.Error(w, "Failed to update project circuit", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
 	})
 
 	fmt.Printf("Starting server on port %s\n", Env.PORT)
