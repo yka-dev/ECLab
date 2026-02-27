@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +46,7 @@ func main() {
 		Password string `json:"password"`
 	}
 
-	router.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/auth/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			var request AuthRequest
@@ -68,13 +69,14 @@ func main() {
 
 			cookie := &http.Cookie{}
 			path := r.URL.Query().Get("path")
-			if path == "register" {
+			switch path {
+			case "login":
 				cookie, err = register(r.Context(), email, password)
 				if err != nil {
 					http.Error(w, "Failed to register: "+err.Error(), http.StatusInternalServerError)
 					return
 				}
-			} else if path == "register" {
+			case "register":
 				cookie, err = login(r.Context(), email, password)
 				if err != nil {
 					http.Error(w, "Invalid credentials", http.StatusUnauthorized)
@@ -106,15 +108,14 @@ func main() {
 		}
 	})
 
-	router.HandleFunc("/project", func(w http.ResponseWriter, r *http.Request) {
-		_, err := getSessionFromRequest(r)
+	router.Post("/project", func(w http.ResponseWriter, r *http.Request) {
+		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		switch r.Method {
-		case http.MethodPost:
+
 			var newProjectData struct {
 				Name string `json:"name"`
 			}
@@ -124,16 +125,122 @@ func main() {
 				return
 			}
 
-
-			DB.CreateProject(r.Context(), repositery.CreateProjectParams{
-
+			project, err := DB.CreateProject(r.Context(), repositery.CreateProjectParams{
+				Name:   newProjectData.Name,
+				UserID: session.UserID,
 			})
 
-			// Handle project creation
+			if err != nil {
+				http.Error(w, "Failed to create project", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(project)
+	})
+
+	router.HandleFunc("/project/{id}", func(w http.ResponseWriter, r *http.Request) {
+		session, err := getSessionFromRequest(r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		idStr := chi.URLParam(r, "id")
+		projectID, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid project id", http.StatusBadRequest)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			project, err := DB.GetProjectByID(r.Context(), repositery.GetProjectByIDParams{
+				ID:     projectID,
+				UserID: session.UserID,
+			})
+
+			if err != nil {
+				http.Error(w, "Failed to get project", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(project)
+		case http.MethodDelete:
+			err = DB.DeleteProjectByID(r.Context(), repositery.DeleteProjectByIDParams{
+				ID:     projectID,
+				UserID: session.UserID,
+			})
+
+			if err != nil {
+				http.Error(w, "Failed to delete project", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case http.MethodPatch:
+			var updateProjectData struct {
+				Name string `json:"name"`
+			}
+
+			if err := json.NewDecoder(r.Body).Decode(&updateProjectData); err != nil {
+				http.Error(w, "Invalid request payload", http.StatusBadRequest)
+				return
+			}
+			
+			err = DB.UpdateProjectByID(r.Context(), repositery.UpdateProjectByIDParams{
+				ID:     projectID,
+				Name:   updateProjectData.Name,
+				UserID: session.UserID,
+			})
+
+			if err != nil {
+				http.Error(w, "Failed to update project", http.StatusInternalServerError)
+				return
+			}
+
 			w.WriteHeader(http.StatusOK)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+
+	})
+
+	router.Patch("/project/circuit/{id}", func (w http.ResponseWriter, r * http.Request) {
+		session, err := getSessionFromRequest(r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var updateProjectCircuitData struct {
+			Circuit []byte `json:"circuit"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&updateProjectCircuitData); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		idStr := strings.TrimPrefix(r.URL.Path, "/project/circuit/")
+		projectID, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid project id", http.StatusBadRequest)
+			return
+		}
+
+		err = DB.UpdateProjectCircuitByID(r.Context(), repositery.UpdateProjectCircuitByIDParams{
+			ID:      projectID,
+			Circuit: updateProjectCircuitData.Circuit,
+			UserID:  session.UserID,
+		})
+
+		if err != nil {
+			http.Error(w, "Failed to update project circuit", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
 	})
 
 	fmt.Printf("Starting server on port %s\n", Env.PORT)

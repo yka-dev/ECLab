@@ -3,6 +3,7 @@ CREATE TYPE project_role as ENUM ('owner', 'editor', 'viewer');
 CREATE TABLE IF NOT EXISTS projects (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
+    circuit JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
