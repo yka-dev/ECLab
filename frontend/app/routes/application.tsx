@@ -1,13 +1,40 @@
-import { useRef, useEffect } from "react"
+import { useRef, useEffect, useState } from "react"
 import { Button } from "~/components/ui/button"
 import { ButtonGroup } from "~/components/ui/button-group"
 import { PlusIcon } from "lucide-react"
-import { FiPlay, FiEye, FiPlus, FiZap, FiSettings } from "react-icons/fi"
+import { FiPlay, FiEye, FiPlus, FiZap, FiSettings, FiStop } from "react-icons/fi"
 import { PiCursor, PiHandGrabbing, PiPause, PiPolygon } from "react-icons/pi"
 import { LuSettings } from "react-icons/lu"
 
 export default function Application() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [runActive, setRunActive] = useState(false)
+  const [pauseActive, setPauseActive] = useState(false)
+
+  const toggleRun = () => {
+    setRunActive((prev) => {
+      const next = !prev
+      if (next) {
+        // starting run -> ensure not paused
+        setPauseActive(false)
+      }
+      return next
+    })
+  }
+
+  const togglePause = () => {
+    setPauseActive((prev) => {
+      const next = !prev
+      if (next) {
+        // just paused -> stop running
+        setRunActive(false)
+      } else {
+        // resumed (Continuer) -> start running
+        setRunActive(true)
+      }
+      return next
+    })
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 relative overflow-hidden">
@@ -107,28 +134,50 @@ export default function Application() {
           </div>
 
           
+
           <div
             aria-hidden="true"
             className="mx-2 h-8 w-[1.5px] bg-slate-200/80 rounded-sm bg-gradient-to-b from-slate-300/95 to-slate-400/95 shadow-sm"
           />
 
-          <Button variant="outline" className="flex items-center gap-2 px-3">
-            <FiPlay className="h-4 w-4" />
-            Démarrer
-          </Button>
-
-          <Button className="flex items-center gap-2 px-3">
-            <PiPause className="h-4 w-4" />
-            Pause
-          </Button>
-
           <Button
-            variant="ghost"
-            aria-label="Quick add"
-            className="p-2 hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+            variant="outline"
+            onClick={toggleRun}
+            disabled={pauseActive}
+            aria-pressed={runActive}
+            className={`flex items-center gap-2 px-3 ${runActive ? "bg-green-50 border-green-200" : ""} ${pauseActive ? "opacity-60 cursor-not-allowed" : ""}`}
           >
-            <LuSettings className="h-4 w-4" />
+            {runActive ? <FiStop className="h-4 w-4" /> : <FiPlay className="h-4 w-4" />}
+            {runActive ? " Stop" : " Démarrer"}
           </Button>
+          
+          <Button
+            onClick={togglePause}
+            disabled={runActive}
+            aria-pressed={pauseActive}
+            className={`flex items-center gap-2 px-3 ${pauseActive ? "bg-amber-50 border-amber-200" : ""} ${runActive ? "opacity-60 cursor-not-allowed" : ""}`}
+          >
+            {pauseActive ? <FiPlay className="h-4 w-4" /> : <PiPause className="h-4 w-4" />}
+            {pauseActive ? " Continuer" : " Pause"}
+          </Button>
+
+          
+          {/* Settings button with tooltip on hover */}
+          <div className="relative flex items-center justify-center group">
+            <Button
+              variant="ghost"
+              aria-label="Settings"
+              className="p-2 hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+            >
+              <LuSettings className="h-4 w-4" />
+            </Button>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute -top-10 left-1/2 -translate-x-1/2 rounded-md bg-slate-800 text-white text-xs py-1 px-2 whitespace-nowrap opacity-0 scale-95 transform transition-all duration-150 group-hover:opacity-100 group-hover:scale-100"
+            >
+              Paramètres
+            </span>
+          </div>
         </div>
       </div>
     </div>
