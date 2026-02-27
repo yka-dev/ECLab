@@ -28,6 +28,6 @@ export class Resistor extends Component {
 
             G.set(this.node2 - 1, this.node1 - 1,
                 G.get(this.node2 - 1, this.node1 - 1) - g);
-        }
+        } 
     }
 }
