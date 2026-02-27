@@ -1,3 +1,4 @@
+import { createSimulationWorker } from "simulation";
 import { LoginForm } from "~/components/login-form";
 
 export default function Login() {

@@ -30,7 +30,6 @@ export class VoltageSource extends Component {
             G.set(this.node2 - 1, n - 1 - k, -1);
             G.set(n - 1 - k, this.node2 - 1, -1);
         }
-//test
         b.set(n - 1 - k, 0, this.voltage);
     }
 }
