@@ -2,9 +2,9 @@
   "name": "simulation",
   "version": "1.0.0",
   "dependencies": {
-    "mathjs": "^15.1.1"
+    "ml-matrix": "^6.12.1"
   },
   "exports": {
-    "." : "./src/index.ts"
+    ".": "./src/index.ts"
   }
 }
