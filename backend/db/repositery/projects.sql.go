@@ -16,14 +16,18 @@ WITH new_project AS (
     INSERT INTO projects (name)
     VALUES ($1)
     RETURNING id, name, created_at, updated_at
+),
+new_member AS (
+    INSERT INTO project_members (project_id, user_id, role)
+    SELECT id, $2, 'owner'
+    FROM new_project
+    RETURNING id, project_id, user_id, role, created_at
 )
-INSERT INTO project_members (project_id, user_id, role)
-SELECT 
-    np.id,
-    $2,
-    'owner'
-FROM new_project np
-RETURNING id, project_id, user_id, role, created_at
+SELECT
+    new_project.id, new_project.name, new_project.created_at, new_project.updated_at,
+    new_member.id, new_member.project_id, new_member.user_id, new_member.role, new_member.created_at
+FROM new_project
+JOIN new_member ON new_member.project_id = new_project.id
 `
 
 type CreateProjectParams struct {
@@ -31,17 +35,52 @@ type CreateProjectParams struct {
 	UserID int64  `json:"user_id"`
 }
 
-func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (ProjectMember, error) {
+type CreateProjectRow struct {
+	ID          int64            `json:"id"`
+	Name        string           `json:"name"`
+	CreatedAt   pgtype.Timestamp `json:"created_at"`
+	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
+	ID_2        int64            `json:"id_2"`
+	ProjectID   int64            `json:"project_id"`
+	UserID      int64            `json:"user_id"`
+	Role        ProjectRole      `json:"role"`
+	CreatedAt_2 pgtype.Timestamp `json:"created_at_2"`
+}
+
+func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (CreateProjectRow, error) {
 	row := q.db.QueryRow(ctx, createProject, arg.Name, arg.UserID)
-	var i ProjectMember
+	var i CreateProjectRow
 	err := row.Scan(
 		&i.ID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ID_2,
 		&i.ProjectID,
 		&i.UserID,
 		&i.Role,
-		&i.CreatedAt,
+		&i.CreatedAt_2,
 	)
 	return i, err
+}
+
+const deleteProjectByID = `-- name: DeleteProjectByID :exec
+DELETE FROM projects p
+USING project_members pm
+WHERE p.id = $1
+  AND pm.project_id = p.id
+  AND pm.user_id = $2
+  AND pm.role = 'owner'
+`
+
+type DeleteProjectByIDParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) DeleteProjectByID(ctx context.Context, arg DeleteProjectByIDParams) error {
+	_, err := q.db.Exec(ctx, deleteProjectByID, arg.ID, arg.UserID)
+	return err
 }
 
 const getProjectByID = `-- name: GetProjectByID :one
@@ -146,4 +185,26 @@ func (q *Queries) GetProjectsByUserID(ctx context.Context, userID int64) ([]GetP
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateProjectByID = `-- name: UpdateProjectByID :exec
+UPDATE projects p
+SET name = $1,
+    updated_at = NOW()
+FROM project_members pm
+WHERE p.id = $2
+  AND pm.project_id = p.id
+  AND pm.user_id = $3
+  AND pm.role = 'owner'
+`
+
+type UpdateProjectByIDParams struct {
+	Name   string `json:"name"`
+	ID     int64  `json:"id"`
+	UserID int64  `json:"user_id"`
+}
+
+func (q *Queries) UpdateProjectByID(ctx context.Context, arg UpdateProjectByIDParams) error {
+	_, err := q.db.Exec(ctx, updateProjectByID, arg.Name, arg.ID, arg.UserID)
+	return err
 }

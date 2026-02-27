@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +46,7 @@ func main() {
 		Password string `json:"password"`
 	}
 
-	router.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/auth/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			var request AuthRequest
@@ -68,13 +69,14 @@ func main() {
 
 			cookie := &http.Cookie{}
 			path := r.URL.Query().Get("path")
-			if path == "register" {
+			switch path {
+			case "login":
 				cookie, err = register(r.Context(), email, password)
 				if err != nil {
 					http.Error(w, "Failed to register: "+err.Error(), http.StatusInternalServerError)
 					return
 				}
-			} else if path == "register" {
+			case "register":
 				cookie, err = login(r.Context(), email, password)
 				if err != nil {
 					http.Error(w, "Invalid credentials", http.StatusUnauthorized)
@@ -106,8 +108,8 @@ func main() {
 		}
 	})
 
-	router.HandleFunc("/project", func(w http.ResponseWriter, r *http.Request) {
-		_, err := getSessionFromRequest(r)
+	router.HandleFunc("/project/", func(w http.ResponseWriter, r *http.Request) {
+		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -124,13 +126,66 @@ func main() {
 				return
 			}
 
-
-			DB.CreateProject(r.Context(), repositery.CreateProjectParams{
-
+			project, err := DB.CreateProject(r.Context(), repositery.CreateProjectParams{
+				Name:   newProjectData.Name,
+				UserID: session.UserID,
 			})
 
-			// Handle project creation
+			if err != nil {
+				http.Error(w, "Failed to create project", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(project)
+		case http.MethodDelete:
+			idStr := strings.TrimPrefix(r.URL.Path, "/project/")
+			projectID, err := strconv.ParseInt(idStr, 10, 64)
+			if err != nil {
+				http.Error(w, "Invalid project id", http.StatusBadRequest)
+				return
+			}
+
+			err = DB.DeleteProjectByID(r.Context(), repositery.DeleteProjectByIDParams{
+				ID:     projectID,
+				UserID: session.UserID,
+			})
+
+			if err != nil {
+				http.Error(w, "Failed to delete project", http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
+		case http.MethodPatch:
+			var updateProjectData struct {
+				Name string `json:"name"`
+			}
+
+			if err := json.NewDecoder(r.Body).Decode(&updateProjectData); err != nil {
+				http.Error(w, "Invalid request payload", http.StatusBadRequest)
+				return
+			}
+
+			idStr := strings.TrimPrefix(r.URL.Path, "/project/")
+			projectID, err := strconv.ParseInt(idStr, 10, 64)
+			if err != nil {
+				http.Error(w, "Invalid project id", http.StatusBadRequest)
+				return
+			}
+
+			err = DB.UpdateProjectByID(r.Context(), repositery.UpdateProjectByIDParams{
+				ID:     projectID,
+				Name:   updateProjectData.Name,
+				UserID: session.UserID,
+			})
+
+			if err != nil {
+				http.Error(w, "Failed to update project", http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
