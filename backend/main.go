@@ -45,79 +45,95 @@ func main() {
 		Password string `json:"password"`
 	}
 
-	router.Post("/auth/register", func(w http.ResponseWriter, r *http.Request) {
-		var request AuthRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
-			return
-		}
+	router.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			var request AuthRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, "Invalid request payload", http.StatusBadRequest)
+				return
+			}
 
-		email, err := validateEmail(request.Email)
-		if err != nil {
-			http.Error(w, "Invalid email address", http.StatusBadRequest)
-			return
-		}
+			email, err := validateEmail(request.Email)
+			if err != nil {
+				http.Error(w, "Invalid email address", http.StatusBadRequest)
+				return
+			}
 
-		password, err := validatePassword(request.Password)
-		if err != nil {
-			http.Error(w, "Invalid password", http.StatusBadRequest)
-			return
-		}
+			password, err := validatePassword(request.Password)
+			if err != nil {
+				http.Error(w, "Invalid password", http.StatusBadRequest)
+				return
+			}
 
-		cookie, err := register(r.Context(), email, password)
-		if err != nil {
-			http.Error(w, "Failed to register user", http.StatusUnauthorized)
-			return
-		}
+			cookie := &http.Cookie{}
+			path := r.URL.Query().Get("path")
+			if path == "register" {
+				cookie, err = register(r.Context(), email, password)
+				if err != nil {
+					http.Error(w, "Failed to register: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else if path == "register" {
+				cookie, err = login(r.Context(), email, password)
+				if err != nil {
+					http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+					return
+				}
+			}
 
-		w.Header().Set("Set-Cookie", cookie.String())
-		w.WriteHeader(http.StatusOK)
+			w.Header().Set("Set-Cookie", cookie.String())
+			w.WriteHeader(http.StatusOK)
+
+		case http.MethodDelete:
+			session, err := getSessionFromRequest(r)
+			if err != nil {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			cookie, err := logout(r.Context(), *session)
+			if err != nil {
+				http.Error(w, "Failed to logout", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Set-Cookie", cookie.String())
+			w.WriteHeader(http.StatusOK)
+
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
-	router.Post("/auth/login", func(w http.ResponseWriter, r *http.Request) {
-		var request AuthRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
-			return
-		}
-
-		email, err := validateEmail(request.Email)
-		if err != nil {
-			http.Error(w, "Invalid email address", http.StatusBadRequest)
-			return
-		}
-
-		password, err := validatePassword(request.Password)
-		if err != nil {
-			http.Error(w, "Invalid password", http.StatusBadRequest)
-			return
-		}
-
-		cookie, err := login(r.Context(), email, password)
-		if err != nil {
-			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-			return
-		}
-
-		w.Header().Set("Set-Cookie", cookie.String())
-		w.WriteHeader(http.StatusOK)
-	})
-
-	router.Delete("/auth", func(w http.ResponseWriter, r *http.Request) {
-		session, err := getSessionFromRequest(r)
+	router.HandleFunc("/project", func(w http.ResponseWriter, r *http.Request) {
+		_, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		cookie, err := logout(r.Context(), *session)
-		if err != nil {
-			http.Error(w, "Failed to logout", http.StatusInternalServerError)
-			return
-		}
+		switch r.Method {
+		case http.MethodPost:
+			var newProjectData struct {
+				Name string `json:"name"`
+			}
 
-		w.Header().Set("Set-Cookie", cookie.String())
-		w.WriteHeader(http.StatusOK)
+			if err := json.NewDecoder(r.Body).Decode(&newProjectData); err != nil {
+				http.Error(w, "Invalid request payload", http.StatusBadRequest)
+				return
+			}
+
+
+			DB.CreateProject(r.Context(), repositery.CreateProjectParams{
+
+			})
+
+			// Handle project creation
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
 	fmt.Printf("Starting server on port %s\n", Env.PORT)
