@@ -55,6 +55,7 @@ Un enseignant utilise l’application en classe pour montrer en temps réel l’
 <img width="797" height="486" alt="Vue 1" src="https://github.com/user-attachments/assets/7f678693-6e03-4f25-801f-5c06d7f07d6f" />
 <img width="677" height="289" alt="Vue 2" src="https://github.com/user-attachments/assets/076d58a8-7572-491c-9253-459332d8720e" />
 Description du Vue de l'interface
+
 L’image montre l’interface principale de ECLab.
 
 À gauche : une barre contenant les composants électroniques disponibles.
