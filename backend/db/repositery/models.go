@@ -57,16 +57,17 @@ func (ns NullProjectRole) Value() (driver.Value, error) {
 }
 
 type Project struct {
-	ID        int32            `json:"id"`
+	ID        int64            `json:"id"`
 	Name      string           `json:"name"`
+	Circuit   []byte           `json:"circuit"`
 	CreatedAt pgtype.Timestamp `json:"created_at"`
 	UpdatedAt pgtype.Timestamp `json:"updated_at"`
 }
 
 type ProjectMember struct {
-	ID        int32            `json:"id"`
-	ProjectID int32            `json:"project_id"`
-	UserID    int32            `json:"user_id"`
+	ID        int64            `json:"id"`
+	ProjectID int64            `json:"project_id"`
+	UserID    int64            `json:"user_id"`
 	Role      ProjectRole      `json:"role"`
 	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
