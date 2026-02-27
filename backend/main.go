@@ -116,27 +116,27 @@ func main() {
 		}
 
 
-			var newProjectData struct {
-				Name string `json:"name"`
-			}
+		var newProjectData struct {
+			Name string `json:"name"`
+		}
 
-			if err := json.NewDecoder(r.Body).Decode(&newProjectData); err != nil {
-				http.Error(w, "Invalid request payload", http.StatusBadRequest)
-				return
-			}
+		if err := json.NewDecoder(r.Body).Decode(&newProjectData); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
 
-			project, err := DB.CreateProject(r.Context(), repositery.CreateProjectParams{
-				Name:   newProjectData.Name,
-				UserID: session.UserID,
-			})
+		project, err := DB.CreateProject(r.Context(), repositery.CreateProjectParams{
+			Name:   newProjectData.Name,
+			UserID: session.UserID,
+		})
 
-			if err != nil {
-				http.Error(w, "Failed to create project", http.StatusInternalServerError)
-				return
-			}
+		if err != nil {
+			http.Error(w, "Failed to create project", http.StatusInternalServerError)
+			return
+		}
 
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(project)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(project)
 	})
 
 	router.HandleFunc("/project/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +187,7 @@ func main() {
 				http.Error(w, "Invalid request payload", http.StatusBadRequest)
 				return
 			}
-			
+
 			err = DB.UpdateProjectByID(r.Context(), repositery.UpdateProjectByIDParams{
 				ID:     projectID,
 				Name:   updateProjectData.Name,
@@ -206,7 +206,7 @@ func main() {
 
 	})
 
-	router.Patch("/project/circuit/{id}", func (w http.ResponseWriter, r * http.Request) {
+	router.Post("/project/circuit/{id}", func (w http.ResponseWriter, r * http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -222,7 +222,8 @@ func main() {
 			return
 		}
 
-		idStr := strings.TrimPrefix(r.URL.Path, "/project/circuit/")
+		idStr := chi.URLParam(r, "id")
+		
 		projectID, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
 			http.Error(w, "Invalid project id", http.StatusBadRequest)
