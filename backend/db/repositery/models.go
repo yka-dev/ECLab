@@ -5,12 +5,82 @@
 package repositery
 
 import (
+	"database/sql/driver"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ProjectRole string
+
+const (
+	ProjectRoleOwner  ProjectRole = "owner"
+	ProjectRoleEditor ProjectRole = "editor"
+	ProjectRoleViewer ProjectRole = "viewer"
+)
+
+func (e *ProjectRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ProjectRole(s)
+	case string:
+		*e = ProjectRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ProjectRole: %T", src)
+	}
+	return nil
+}
+
+type NullProjectRole struct {
+	ProjectRole ProjectRole `json:"project_role"`
+	Valid       bool        `json:"valid"` // Valid is true if ProjectRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullProjectRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.ProjectRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ProjectRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullProjectRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ProjectRole), nil
+}
+
+type Project struct {
+	ID        int32            `json:"id"`
+	Name      string           `json:"name"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+	UpdatedAt pgtype.Timestamp `json:"updated_at"`
+}
+
+type ProjectMember struct {
+	ID        int32            `json:"id"`
+	ProjectID int32            `json:"project_id"`
+	UserID    int32            `json:"user_id"`
+	Role      ProjectRole      `json:"role"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+}
+
+type Session struct {
+	ID        uuid.UUID  `json:"id"`
+	UserID    int64      `json:"user_id"`
+	CreatedAt *time.Time `json:"created_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+}
+
 type User struct {
-	ID           int32            `json:"id"`
-	Email        string           `json:"email"`
-	PasswordHash string           `json:"password_hash"`
-	CreatedAt    pgtype.Timestamp `json:"created_at"`
+	ID           int64      `json:"id"`
+	Email        string     `json:"email"`
+	PasswordHash string     `json:"password_hash"`
+	CreatedAt    *time.Time `json:"created_at"`
 }
