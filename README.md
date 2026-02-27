@@ -54,3 +54,25 @@ Un enseignant utilise l’application en classe pour montrer en temps réel l’
 ## Vues
 <img width="797" height="486" alt="Vue 1" src="https://github.com/user-attachments/assets/7f678693-6e03-4f25-801f-5c06d7f07d6f" />
 <img width="677" height="289" alt="Vue 2" src="https://github.com/user-attachments/assets/076d58a8-7572-491c-9253-459332d8720e" />
+
+Description du Vue de l'interface
+
+L’image montre l’interface principale de ECLab.
+
+À gauche : une barre contenant les composants électroniques disponibles.
+
+Au centre : la zone de dessin du circuit, où l’utilisateur peut construire son schéma (exemple : résistance et LED).
+
+En bas à droite : un graphique affichant les résultats de la simulation (tension, courant, etc.).
+
+En haut : les options principales comme le lancement de la simulation, les projets et les paramètres.
+
+Cette interface permet de concevoir, simuler et analyser des circuits électriques de manière simple et interactive.
+
+## Conclusion
+
+ECLab est un projet qui combine technologie et éducation afin de rendre l’apprentissage de l’électricité plus accessible, interactif et concret. En intégrant une interface intuitive, un système de simulation basé sur des matrices et une gestion complète des utilisateurs et des sauvegardes, notre application offre un environnement complet pour la modélisation et l’analyse de circuits électriques.
+
+Grâce à l’utilisation d’outils modernes comme Golang, TypeScript avec React, PostgreSQL et GitHub, notre équipe met en place une architecture solide, évolutive et collaborative. La répartition claire des tâches permet d’assurer un développement structuré et efficace.
+
+Plus qu’un simple outil technique, ECLab est une solution pensée pour rapprocher la théorie de la pratique. Il permet aux élèves de visualiser concrètement ce qu’ils apprennent en classe et d’expérimenter par eux-mêmes, tout en donnant aux enseignants un moyen clair et interactif d’illustrer leurs explications.
