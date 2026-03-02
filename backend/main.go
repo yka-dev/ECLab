@@ -48,7 +48,7 @@ func main() {
 
 	router.HandleFunc("/auth/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case http.MethodPost:
+		case http.MethodPost, http.MethodGet:
 			var request AuthRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				http.Error(w, "Invalid request payload", http.StatusBadRequest)
@@ -68,18 +68,16 @@ func main() {
 			}
 
 			cookie := &http.Cookie{}
-			path := r.URL.Query().Get("path")
-			switch path {
-			case "login":
-				cookie, err = register(r.Context(), email, password)
+			if strings.Contains(r.URL.Path, "login") {
+				cookie, err = signup(r.Context(), email, password)
 				if err != nil {
-					http.Error(w, "Failed to register: "+err.Error(), http.StatusInternalServerError)
+					http.Error(w, "Invalid credentials", http.StatusInternalServerError)
 					return
 				}
-			case "register":
-				cookie, err = login(r.Context(), email, password)
+			} else if strings.Contains(r.URL.Path, "signup") {
+				cookie, err = signup(r.Context(), email, password)
 				if err != nil {
-					http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+					http.Error(w, "Failed to signup", http.StatusUnauthorized)
 					return
 				}
 			}
@@ -115,7 +113,6 @@ func main() {
 			return
 		}
 
-
 		var newProjectData struct {
 			Name string `json:"name"`
 		}
@@ -137,6 +134,23 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(project)
+	})
+
+	router.Get("/projects", func(w http.ResponseWriter, r *http.Request) {
+		session, err := getSessionFromRequest(r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		projects, err := DB.GetProjectsByUserID(r.Context(), session.UserID)
+		if err != nil {
+			http.Error(w, "Failed to get projects", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(projects)
 	})
 
 	router.HandleFunc("/project/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +220,7 @@ func main() {
 
 	})
 
-	router.Post("/project/circuit/{id}", func (w http.ResponseWriter, r * http.Request) {
+	router.Post("/project/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -223,7 +237,7 @@ func main() {
 		}
 
 		idStr := chi.URLParam(r, "id")
-		
+
 		projectID, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
 			http.Error(w, "Invalid project id", http.StatusBadRequest)
@@ -248,7 +262,7 @@ func main() {
 	http.ListenAndServe(Env.PORT, router)
 }
 
-func register(ctx context.Context, email string, password string) (*http.Cookie, error) {
+func signup(ctx context.Context, email string, password string) (*http.Cookie, error) {
 	hashedPassword, err := hashPassword(password)
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password")
@@ -303,7 +317,7 @@ func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
 		Name:     "session_id",
 		Value:    value,
 		Expires:  expiresAt,
-		HttpOnly: true,
+		HttpOnly: false,
 		Secure:   true,
 	}
 }
