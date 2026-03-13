@@ -13,13 +13,29 @@ export function meta({}: Route.MetaArgs) {
 export default function Home() {
 
   useEffect(() => {
-    const worker = createSimulationWorker()
+    const worker = createSimulationWorker();
 
     worker.onmessage = (event) => {
-      console.log("Message from worker:", event.data);
+      const result = event.data;
+
+      if (result.error) {
+        console.error("Erreur du worker de simulation :", result.error);
+        return;
+      }
+
+      console.log("Tensions des nœuds :", result.nodeVoltages);
+      console.log("Courants des sources :", result.sourceCurrents);
+      console.log("Vecteur solution :", result.solutionVector);
     };
 
     worker.postMessage({ type: "runTest" });
-  }, []);
-  return <Welcome />;
+
+  
+  } , []);
+  
+  return (
+    <div>
+      <Welcome />
+    </div>
+  );
 }
