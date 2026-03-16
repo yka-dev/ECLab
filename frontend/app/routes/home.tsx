@@ -2,6 +2,7 @@ import type { Route } from "./+types/home";
 import { Welcome } from "../welcome/welcome";
 import { useEffect } from "react";
 import { createSimulationWorker } from "simulation";
+import { toast } from "sonner";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -11,7 +12,6 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Home() {
-
   useEffect(() => {
     const worker = createSimulationWorker();
 
