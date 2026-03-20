@@ -9,7 +9,7 @@ import {
   FieldSeparator,
 } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import bigBrains from "/bigBrains.jpg";
+import logoImage from "/LOGO.png";
 import { useState } from "react";
 import { toast } from "sonner";
 import { redirect } from "react-router";
@@ -58,8 +58,9 @@ export function SignupForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="overflow-hidden p-0">
-        <CardContent className="grid p-0 md:grid-cols-2">
+      <div className="rounded-3xl bg-gradient-to-br from-zinc-950 via-zinc-500 to-white p-[1px] shadow-[0_18px_48px_rgba(0,0,0,0.28),0_0_20px_rgba(255,255,255,0.1)]">
+        <Card className="overflow-hidden rounded-[calc(1.5rem-1px)] border-0 bg-background p-0">
+          <CardContent className="grid p-0 md:grid-cols-2">
           <form className="p-6 md:p-8" onSubmit={handleSubmit}>
             <FieldGroup>
               <div className="flex flex-col items-center gap-2 text-center">
@@ -136,15 +137,16 @@ export function SignupForm({
               </FieldDescription>
             </FieldGroup>
           </form>
-          <div className="bg-muted relative hidden md:block">
+          <div className="relative hidden bg-black md:block">
             <img
-              src={bigBrains}
+              src={logoImage}
               alt="Image"
               className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
             />
           </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
       <FieldDescription className="px-6 text-center">
         En cliquant sur continuer, vous acceptez nos{" "}
         <a href="#">Conditions d&apos;utilisation</a> et{" "}
