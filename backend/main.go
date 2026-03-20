@@ -4,6 +4,7 @@ import (
 	"context"
 	"eclab/db"
 	"eclab/db/repositery"
+	"eclab/email"
 	"eclab/env"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 
 var Env env.Env
 var DB db.DB
+var Email email.Email
 
 func main() {
 	godotenv.Load()
@@ -38,6 +40,8 @@ func main() {
 		return
 	}
 	defer DB.Close()
+
+	Email = email.New(Env.BREVO_API_KEY)
 
 	router := chi.NewRouter()
 
