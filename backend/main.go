@@ -129,7 +129,7 @@ func main() {
 			return
 		}
 
-		_, err = DB.CreateRequest(r.Context(), repositery.CreateRequestParams{
+		newRequest, err := DB.CreateRequest(r.Context(), repositery.CreateRequestParams{
 			Type:      repositery.RequestsTypeResetPassword,
 			UserID:    user.ID,
 			ExpiresAt: time.Now().Add(time.Hour * 3), // Expires in 3 hours
@@ -140,13 +140,11 @@ func main() {
 		}
 
 		
-		// TODO: handle email sending
-		
-		// if err := s.Email.SendTempl(r.Context(), user.Email, "Reset your password", templates.ForgotPasswordReset(s.ENV.DOMAIN, newRequest.ID)); err != nil {
-		// 	log.Printf("Failed to send password reset email : %s\n", err)
-		// 	http.Error(w, "Internal server error", http.StatusInternalServerError)
-		// 	return
-		// }
+		if err := Email.SendPasswordResetEmail(r.Context(), user.Email, fmt.Sprintf("%s/reset-password?token=%s", Env.URL, newRequest.ID)); err != nil {
+			log.Printf("Failed to send password reset email : %s\n", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 
 		w.WriteHeader(http.StatusOK)
 	})
