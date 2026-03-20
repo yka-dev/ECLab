@@ -11,6 +11,8 @@ import (
 type Env struct {
 	DATABASE_URL string
 	PORT string
+	BREVO_API_KEY string
+	URL string
 }
 
 func InitEnv() (Env, error) {
@@ -22,5 +24,7 @@ func InitEnv() (Env, error) {
 	return Env{
 		DATABASE_URL:         os.Getenv("DATABASE_URL"),
 		PORT:                 os.Getenv("PORT"),
+		BREVO_API_KEY:        os.Getenv("BREVO_API_KEY"),
+		URL:                  os.Getenv("URL"),
 	}, nil
 }
