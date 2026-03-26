@@ -56,6 +56,49 @@ func (ns NullProjectRole) Value() (driver.Value, error) {
 	return string(ns.ProjectRole), nil
 }
 
+type RequestsType string
+
+const (
+	RequestsTypeResetPassword RequestsType = "reset_password"
+	RequestsTypeVerifyEmail   RequestsType = "verify_email"
+	RequestsTypeJoinTeam      RequestsType = "join_team"
+)
+
+func (e *RequestsType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RequestsType(s)
+	case string:
+		*e = RequestsType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RequestsType: %T", src)
+	}
+	return nil
+}
+
+type NullRequestsType struct {
+	RequestsType RequestsType `json:"requests_type"`
+	Valid        bool         `json:"valid"` // Valid is true if RequestsType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRequestsType) Scan(value interface{}) error {
+	if value == nil {
+		ns.RequestsType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RequestsType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRequestsType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RequestsType), nil
+}
+
 type Project struct {
 	ID        int64            `json:"id"`
 	Name      string           `json:"name"`
@@ -72,6 +115,15 @@ type ProjectMember struct {
 	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
 
+type Request struct {
+	ID        uuid.UUID    `json:"id"`
+	Type      RequestsType `json:"type"`
+	UserID    int64        `json:"user_id"`
+	ProjectID *int64       `json:"project_id"`
+	CreatedAt time.Time    `json:"created_at"`
+	ExpiresAt time.Time    `json:"expires_at"`
+}
+
 type Session struct {
 	ID        uuid.UUID  `json:"id"`
 	UserID    int64      `json:"user_id"`
@@ -80,8 +132,9 @@ type Session struct {
 }
 
 type User struct {
-	ID           int64      `json:"id"`
-	Email        string     `json:"email"`
-	PasswordHash string     `json:"password_hash"`
-	CreatedAt    *time.Time `json:"created_at"`
+	ID                int64      `json:"id"`
+	Email             string     `json:"email"`
+	PasswordHash      string     `json:"password_hash"`
+	CreatedAt         *time.Time `json:"created_at"`
+	PasswordUpdatedAt *time.Time `json:"password_updated_at"`
 }
