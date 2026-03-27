@@ -1,5 +1,4 @@
-import { Matrix } from 'ml-matrix';
-import { Component } from './Component';
+import { Component, StampContext } from './Component';
 
 export class VoltageSource extends Component {
     voltage: number;
@@ -19,19 +18,22 @@ export class VoltageSource extends Component {
         this.mnaRow = row;
     }
 
-    stamp(G: Matrix, b: Matrix): void {
+    stamp({ G, b, nodeIndexMap }: StampContext): void {
         if (this.mnaRow === null) {
             throw new Error(` La source de tension ${this.id} na pas de ligne assignée dans la matrice MNA. `);
         }
 
-        if (this.node1 !== 0) {
-            G.set(this.node1 - 1, this.mnaRow, 1);
-            G.set(this.mnaRow, this.node1 - 1, 1);
+        const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
+        const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
+
+        if (node1Index !== null) {
+            G.set(node1Index, this.mnaRow, 1);
+            G.set(this.mnaRow, node1Index, 1);
         }
 
-        if (this.node2 !== 0) {
-            G.set(this.node2 - 1, this.mnaRow, -1);
-            G.set(this.mnaRow, this.node2 - 1, -1);
+        if (node2Index !== null) {
+            G.set(node2Index, this.mnaRow, -1);
+            G.set(this.mnaRow, node2Index, -1);
         }
 
         b.set(this.mnaRow, 0, this.voltage);

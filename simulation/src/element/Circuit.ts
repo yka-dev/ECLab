@@ -1,3 +1,4 @@
+import { Capacitor } from '../element/Capacitor';
 import { Component } from '../element/Component';
 import { Resistor } from '../element/Resistor';
 import { VoltageSource } from '../element/VoltageSource';
@@ -37,6 +38,20 @@ export class Circuit {
         circuit.addComponent(R3);
         circuit.addComponent(R4);
         circuit.addComponent(R5);
+
+        return circuit;
+    }
+
+    static createRcTestCircuit(): Circuit {
+        const circuit = new Circuit();
+
+        const V1 = new VoltageSource("V1", 1, 0, 10);
+        const R1 = new Resistor("R1", 1, 2, 1000);
+        const C1 = new Capacitor("C1", 2, 0, 1e-6);
+
+        circuit.addComponent(V1);
+        circuit.addComponent(R1);
+        circuit.addComponent(C1);
 
         return circuit;
     }

@@ -1,5 +1,4 @@
-import { Matrix } from 'ml-matrix';
-import { Component } from './Component';
+import { Component, StampContext } from './Component';
 
 export class Resistor extends Component {
     resistance: number;
@@ -9,25 +8,22 @@ export class Resistor extends Component {
         this.resistance = resistance;
     }
 
-    stamp(G: Matrix): void {
+    stamp({ G, nodeIndexMap }: StampContext): void {
         const g = 1 / this.resistance;
+        const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
+        const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
 
-        if (this.node1 !== 0) {
-            G.set(this.node1 - 1, this.node1 - 1,
-                G.get(this.node1 - 1, this.node1 - 1) + g);
+        if (node1Index !== null) {
+            G.set(node1Index, node1Index, G.get(node1Index, node1Index) + g);
         }
 
-        if (this.node2 !== 0) {
-            G.set(this.node2 - 1, this.node2 - 1,
-                G.get(this.node2 - 1, this.node2 - 1) + g);
+        if (node2Index !== null) {
+            G.set(node2Index, node2Index, G.get(node2Index, node2Index) + g);
         }
 
-        if (this.node1 !== 0 && this.node2 !== 0) {
-            G.set(this.node1 - 1, this.node2 - 1,
-                G.get(this.node1 - 1, this.node2 - 1) - g);
-
-            G.set(this.node2 - 1, this.node1 - 1,
-                G.get(this.node2 - 1, this.node1 - 1) - g);
-        } 
+        if (node1Index !== null && node2Index !== null) {
+            G.set(node1Index, node2Index, G.get(node1Index, node2Index) - g);
+            G.set(node2Index, node1Index, G.get(node2Index, node1Index) - g);
+        }
     }
 }

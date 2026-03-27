@@ -6,8 +6,6 @@ self.onmessage = (event: MessageEvent) => {
         self.postMessage({ error: 'Message non supporté' });
         return;
     }
-
-
     const circuit: Circuit = Circuit.createComplexTestCircuit();
     const solver = new MnaSolver();
     const result = solver.solve(circuit.components);
