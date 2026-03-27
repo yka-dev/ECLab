@@ -31,7 +31,7 @@ export abstract class Component {
         return index;
     }
 
-    stamp(_context: StampContext): void {
-        // To be implemented by subclasses
+    stamp( _context: StampContext): void {
+       
     }
 }

@@ -6,9 +6,14 @@ self.onmessage = (event: MessageEvent) => {
         self.postMessage({ error: 'Message non supporté' });
         return;
     }
-    const circuit: Circuit = Circuit.createComplexTestCircuit();
+
+    const circuit: Circuit = Circuit.createRcTestCircuit();
     const solver = new MnaSolver();
-    const result = solver.solve(circuit.components);
+
+    const result = solver.solve(circuit.components, {
+    timeStep: 1e-4,
+    totalTime: 5e-3,
+    });
 
     self.postMessage(result);
 };
