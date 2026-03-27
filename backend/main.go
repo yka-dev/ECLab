@@ -4,6 +4,7 @@ import (
 	"context"
 	"eclab/db"
 	"eclab/db/repositery"
+	"eclab/email"
 	"eclab/env"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 
 var Env env.Env
 var DB db.DB
+var Email email.Email
 
 func main() {
 	godotenv.Load()
@@ -39,6 +41,8 @@ func main() {
 	}
 	defer DB.Close()
 
+	Email = email.New(Env.BREVO_API_KEY)
+
 	router := chi.NewRouter()
 
 	type AuthRequest struct {
@@ -46,9 +50,9 @@ func main() {
 		Password string `json:"password"`
 	}
 
-	router.HandleFunc("/auth/", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case http.MethodPost:
+		case http.MethodPost, http.MethodGet:
 			var request AuthRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				http.Error(w, "Invalid request payload", http.StatusBadRequest)
@@ -68,18 +72,16 @@ func main() {
 			}
 
 			cookie := &http.Cookie{}
-			path := r.URL.Query().Get("path")
-			switch path {
-			case "login":
-				cookie, err = register(r.Context(), email, password)
-				if err != nil {
-					http.Error(w, "Failed to register: "+err.Error(), http.StatusInternalServerError)
-					return
-				}
-			case "register":
+			if strings.Contains(r.URL.Path, "login") {
 				cookie, err = login(r.Context(), email, password)
 				if err != nil {
-					http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+					http.Error(w, "Invalid credentials", http.StatusInternalServerError)
+					return
+				}
+			} else if strings.Contains(r.URL.Path, "signup") {
+				cookie, err = signup(r.Context(), email, password)
+				if err != nil {
+					http.Error(w, "Failed to signup", http.StatusUnauthorized)
 					return
 				}
 			}
@@ -94,11 +96,7 @@ func main() {
 				return
 			}
 
-			cookie, err := logout(r.Context(), *session)
-			if err != nil {
-				http.Error(w, "Failed to logout", http.StatusInternalServerError)
-				return
-			}
+			cookie := logout(r.Context(), session)
 
 			w.Header().Set("Set-Cookie", cookie.String())
 			w.WriteHeader(http.StatusOK)
@@ -108,13 +106,113 @@ func main() {
 		}
 	})
 
+	router.Post("/auth/forgot", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Email string `json:"email"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			log.Printf("Failed to decode request body: %s\n", err)
+			http.Error(w, "Invalid input", http.StatusBadRequest)
+			return
+		}
+
+		email, err := validateEmail(request.Email)
+		if err != nil {
+			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			return
+		}
+
+		user, err := DB.GetUserByEmail(r.Context(), email)
+		if err != nil {
+			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			return
+		}
+
+		newRequest, err := DB.CreateRequest(r.Context(), repositery.CreateRequestParams{
+			Type:      repositery.RequestsTypeResetPassword,
+			UserID:    user.ID,
+			ExpiresAt: time.Now().Add(time.Hour * 3), // Expires in 3 hours
+		})
+		if err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		
+		if err := Email.SendPasswordResetEmail(r.Context(), user.Email, fmt.Sprintf("%s/reset-password?token=%s", Env.URL, newRequest.ID)); err != nil {
+			log.Printf("Failed to send password reset email : %s\n", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	})
+
+	router.Post("/auth/reset", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			RequestID   uuid.UUID `json:"request_id"`
+			NewPassword string    `json:"new_password"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			log.Printf("Failed to parse request body: %s\n", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		newPassword, err := validateEmail(request.NewPassword)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		newRequest, err := DB.GetRequestByID(r.Context(), request.RequestID)
+		if err != nil {
+			http.Error(w, "The password reset request does not exist", http.StatusNotFound)
+			return
+		}
+
+		if newRequest.ExpiresAt.Before(time.Now()) {
+			DB.DeleteRequestByID(r.Context(), request.RequestID)
+			http.Error(w, "The request has expired", http.StatusRequestTimeout)
+			return
+		}
+
+		if newRequest.Type != repositery.RequestsTypeResetPassword {
+			http.Error(w, "Invalid request", http.StatusForbidden)
+			return
+		}
+
+		newPasswordHash, err := hashPassword(newPassword)
+		if err != nil {
+			log.Printf("Failed to hash new password : %s\n", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		if err := DB.UpdateUserPassword(r.Context(), repositery.UpdateUserPasswordParams{
+			ID:           newRequest.UserID,
+			PasswordHash: newPasswordHash,
+		}); err != nil {
+			log.Printf("Failed to update user password: %s\n", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		DB.DeleteSessionsByUserID(r.Context(), newRequest.UserID)
+
+		cookie := logout(r.Context(), nil)
+		http.SetCookie(w, cookie)
+		w.WriteHeader(http.StatusOK)
+	})
+
 	router.Post("/project", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 
 		var newProjectData struct {
 			Name string `json:"name"`
@@ -137,6 +235,23 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(project)
+	})
+
+	router.Get("/projects", func(w http.ResponseWriter, r *http.Request) {
+		session, err := getSessionFromRequest(r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		projects, err := DB.GetProjectsByUserID(r.Context(), session.UserID)
+		if err != nil {
+			http.Error(w, "Failed to get projects", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(projects)
 	})
 
 	router.HandleFunc("/project/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +321,7 @@ func main() {
 
 	})
 
-	router.Post("/project/circuit/{id}", func (w http.ResponseWriter, r * http.Request) {
+	router.Post("/project/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -223,7 +338,7 @@ func main() {
 		}
 
 		idStr := chi.URLParam(r, "id")
-		
+
 		projectID, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
 			http.Error(w, "Invalid project id", http.StatusBadRequest)
@@ -248,7 +363,7 @@ func main() {
 	http.ListenAndServe(Env.PORT, router)
 }
 
-func register(ctx context.Context, email string, password string) (*http.Cookie, error) {
+func signup(ctx context.Context, email string, password string) (*http.Cookie, error) {
 	hashedPassword, err := hashPassword(password)
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password")
@@ -291,11 +406,13 @@ func login(ctx context.Context, email string, password string) (*http.Cookie, er
 	return createAuthCookie(session.ID.String(), session.ExpiresAt), nil
 }
 
-func logout(ctx context.Context, session repositery.Session) (*http.Cookie, error) {
-	err := DB.DeleteSessionByID(ctx, session.ID)
+func logout(ctx context.Context, session *repositery.Session) *http.Cookie {
+	if (session != nil) {
+		DB.DeleteSessionByID(ctx, session.ID)
+	}
 	cookie := createAuthCookie("", time.Now().Add(-time.Hour))
 
-	return cookie, err
+	return cookie
 }
 
 func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
@@ -303,7 +420,7 @@ func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
 		Name:     "session_id",
 		Value:    value,
 		Expires:  expiresAt,
-		HttpOnly: true,
+		HttpOnly: false,
 		Secure:   true,
 	}
 }

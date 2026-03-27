@@ -42,6 +42,30 @@ func (q *Queries) DeleteSessionByID(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteSessionsByUserID = `-- name: DeleteSessionsByUserID :many
+DELETE FROM sessions WHERE user_id = $1 RETURNING id
+`
+
+func (q *Queries) DeleteSessionsByUserID(ctx context.Context, userID int64) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, deleteSessionsByUserID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, user_id, created_at, expires_at FROM sessions WHERE id = $1
 `

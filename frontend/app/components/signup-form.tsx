@@ -1,30 +1,72 @@
-import { cn } from "~/lib/utils"
-import { Button } from "~/components/ui/button"
-import { Card, CardContent } from "~/components/ui/card"
+import { cn } from "~/lib/utils";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
   FieldSeparator,
-} from "~/components/ui/field"
-import { Input } from "~/components/ui/input"
-import bigBrains from "/bigBrains.jpg"
+} from "~/components/ui/field";
+import { Input } from "~/components/ui/input";
+import logoImage from "/LOGO.png";
+import { useState } from "react";
+import { toast } from "sonner";
+import { redirect } from "react-router";
 
 export function SignupForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [retype, setRetype] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = (e: React.SubmitEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    if (retype !== password) {
+      setError("Les mots de passe ne correspondent pas");
+      return;
+    }
+
+    fetch(`${import.meta.env.VITE_API_ENDPOINT}/auth/signup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        password,
+      }),
+    }).then((response) => {
+      if (!response.ok) {
+        response.text().then((err) => setError(error));
+        setLoading(false);
+      } else {
+        toast.success("Votre compte ECLab a été créé avec succès");
+        setTimeout(() => {
+          redirect("/projects");
+        }, 1000);
+      }
+    });
+  };
+
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="overflow-hidden p-0">
-        <CardContent className="grid p-0 md:grid-cols-2">
-          <form className="p-6 md:p-8">
+      <div className="rounded-3xl bg-gradient-to-br from-zinc-950 via-zinc-500 to-white p-[1px] shadow-[0_18px_48px_rgba(0,0,0,0.28),0_0_20px_rgba(255,255,255,0.1)]">
+        <Card className="overflow-hidden rounded-[calc(1.5rem-1px)] border-0 bg-background p-0">
+          <CardContent className="grid p-0 md:grid-cols-2">
+          <form className="p-6 md:p-8" onSubmit={handleSubmit}>
             <FieldGroup>
               <div className="flex flex-col items-center gap-2 text-center">
                 <h1 className="text-2xl font-bold">Créer votre compte</h1>
                 <p className="text-muted-foreground text-sm text-balance">
-                  Entrez votre e-mail ci-dessous pour créer votre compte
+                  Entrez votre e-mail ci-dessous pour créer votre compte ECLab
                 </p>
               </div>
               <Field>
@@ -33,34 +75,50 @@ export function SignupForm({
                   id="email"
                   type="email"
                   placeholder="m@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
                 />
                 <FieldDescription>
-                  Nous l&apos;utiliserons pour vous contacter. Nous ne partagerons votre
-                  e-mail avec personne d&apos;autre.
+                  Nous l&apos;utiliserons pour vous contacter. Nous ne
+                  partagerons votre e-mail avec personne d&apos;autre.
                 </FieldDescription>
               </Field>
               <Field>
                 <Field className="grid grid-cols-2 gap-4">
                   <Field>
                     <FieldLabel htmlFor="password">Mot de passe</FieldLabel>
-                    <Input id="password" type="password" required />
+                    <Input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value.trimStart())}
+                      required
+                    />
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="confirm-password">
                       Confirmer le mot de passe
                     </FieldLabel>
-                    <Input id="confirm-password" type="password" required />
+                    <Input
+                      id="confirm-password"
+                      type="password"
+                      value={retype}
+                      onChange={(e) => setRetype(e.target.value.trimStart())}
+                      required
+                    />
                   </Field>
                 </Field>
                 <FieldDescription>
-                  Doit contenir au moins 8 caractères.
+                  {error != "" ? error : "Doit contenir au moins 8 caractères."}
                 </FieldDescription>
               </Field>
               <Field>
-                <Button type="submit">Créer un compte</Button>
+                <Button type="submit" disabled={loading}>
+                  Créer un compte
+                </Button>
               </Field>
-              <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
+              {/*<FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
                 Ou continuer avec
               </FieldSeparator>
               <Field className="grid grid-cols-1 gap-4">
@@ -73,28 +131,30 @@ export function SignupForm({
                   </svg>
                   <span className="sr-only">S&apos;inscrire avec Google</span>
                 </Button>
-              </Field>
+              </Field>*/}
               <FieldDescription className="text-center">
                 Vous avez déjà un compte ? <a href="/login">Se connecter</a>
               </FieldDescription>
             </FieldGroup>
           </form>
-          <div className="bg-muted relative hidden md:block">
+          <div className="relative hidden bg-black md:block">
             <img
-              src={bigBrains}
+              src={logoImage}
               alt="Image"
               className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
             />
           </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
       <FieldDescription className="px-6 text-center">
-        En cliquant sur continuer, vous acceptez nos <a href="#">Conditions d&apos;utilisation</a>{" "}
-        et <a
+        En cliquant sur continuer, vous acceptez nos{" "}
+        <a href="#">Conditions d&apos;utilisation</a> et{" "}
+        <a
           href="#"
           onClick={(e) => {
-            e.preventDefault()
-            alert("vous êtes pas assez important")
+            e.preventDefault();
+            alert("vous êtes pas assez important");
           }}
         >
           Politique de confidentialité
@@ -102,5 +162,5 @@ export function SignupForm({
         .
       </FieldDescription>
     </div>
-  )
+  );
 }
