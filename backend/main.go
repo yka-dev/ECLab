@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
@@ -44,6 +45,14 @@ func main() {
 	Email = email.New(Env.BREVO_API_KEY)
 
 	router := chi.NewRouter()
+	router.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	}))
 
 	type AuthRequest struct {
 		Email    string `json:"email"`
@@ -139,7 +148,6 @@ func main() {
 			return
 		}
 
-		
 		if err := Email.SendPasswordResetEmail(r.Context(), user.Email, fmt.Sprintf("%s/reset-password?token=%s", Env.URL, newRequest.ID)); err != nil {
 			log.Printf("Failed to send password reset email : %s\n", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -407,7 +415,7 @@ func login(ctx context.Context, email string, password string) (*http.Cookie, er
 }
 
 func logout(ctx context.Context, session *repositery.Session) *http.Cookie {
-	if (session != nil) {
+	if session != nil {
 		DB.DeleteSessionByID(ctx, session.ID)
 	}
 	cookie := createAuthCookie("", time.Now().Add(-time.Hour))
@@ -417,7 +425,7 @@ func logout(ctx context.Context, session *repositery.Session) *http.Cookie {
 
 func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name:     "session_id",
+		Name:     "eclab_session_id",
 		Value:    value,
 		Expires:  expiresAt,
 		HttpOnly: false,

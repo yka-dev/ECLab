@@ -16,6 +16,8 @@ import {
   DialogFooter,
 } from "~/components/ui/dialog";
 import { MoreVertical, Plus, Search, LogOut } from "lucide-react";
+import { getCookie } from "~/lib/utils";
+import { redirect } from "react-router";
 
 type Project = {
   id: string;
@@ -23,6 +25,33 @@ type Project = {
   thumbnail: string;
 };
 
+
+
+export async function loader({ request }: { request: Request }) {
+  const cookieHeader = request.headers.get("Cookie");
+  const session = getCookie(cookieHeader, "eclab_session_id");
+  console.log(session)
+  if(session === null) {
+    return redirect("/projects/guest");
+  }
+
+  fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "credentials": "include",
+    },
+  }).then((response) => {
+    if (!response.ok) {
+      console.log("Session invalide");
+    } else {
+      console.log("Session valide");
+    }
+  });
+
+
+  return { session };
+}
 export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [search, setSearch] = useState("");

@@ -67,7 +67,7 @@ export function LoginForm({
                   type="email"
                   placeholder="m@example.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {setEmail(e.target.value); setLoading(false)}}
                   required
                 />
               </Field>
@@ -85,7 +85,7 @@ export function LoginForm({
                   id="password"
                   type="password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {setPassword(e.target.value); setLoading(false)}}
                   required
                 />
               </Field>
