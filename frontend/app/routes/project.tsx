@@ -17,7 +17,7 @@ export default function Project() {
         aria-hidden="true"
       />
 
-      <aside className="fixed left-6 top-16 bottom-16 w-64 bg-white/80 backdrop-blur-md border border-slate-200 rounded-lg shadow-xl p-4 flex flex-col gap-4 z-40">
+      <aside className="fixed left-6 top-16 bottom-16 w-64 bg-white/80 backdrop-blur-md border border-slate-200 rounded-lg p-4 flex flex-col gap-4 z-40">
         <div>
           <h3 className="text-lg font-semibold">Playground</h3>
           <p className="text-sm text-slate-500">
@@ -28,21 +28,21 @@ export default function Project() {
         <ButtonGroup className="flex flex-col gap-2">
           <Button
             variant="ghost"
-            className="justify-start hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+            className="justify-start hover:bg-slate-100/60 hover:scale-105 transition"
           >
             <PlusIcon className="mr-2 h-4 w-4" />
             New Project
           </Button>
           <Button
             variant="ghost"
-            className="justify-start hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+            className="justify-start hover:bg-slate-100/60 hover:scale-105 transition"
           >
             <PlusIcon className="mr-2 h-4 w-4" />
             Add Component
           </Button>
           <Button
             variant="ghost"
-            className="justify-start hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+            className="justify-start hover:bg-slate-100/60 hover:scale-105 transition"
           >
             Templates
           </Button>
@@ -52,12 +52,12 @@ export default function Project() {
       </aside>
 
       <div className="fixed left-1/2 transform -translate-x-1/2 bottom-6 z-50">
-        <div className="flex items-center gap-3 bg-white/95 backdrop-blur-md border border-slate-200 rounded-full px-3 py-2 shadow-lg">
+        <div className="flex items-center gap-3 bg-white/95 backdrop-blur-md border border-slate-200 rounded-full px-3 py-2">
           <div className="relative flex items-center justify-center group">
             <Button
               variant="ghost"
               aria-label="Quick add"
-              className="p-2 hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+              className="p-2 hover:bg-slate-100/60 hover:scale-105 transition"
             >
               <PiCursor className="h-4 w-4" />
             </Button>
@@ -73,7 +73,7 @@ export default function Project() {
             <Button
               variant="ghost"
               aria-label="Grab"
-              className="p-2 hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+              className="p-2 hover:bg-slate-100/60 hover:scale-105 transition"
             >
               <PiHandGrabbing className="h-4 w-4" />
             </Button>
@@ -89,7 +89,7 @@ export default function Project() {
             <Button
               variant="ghost"
               aria-label="Wires"
-              className="p-2 hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+              className="p-2 hover:bg-slate-100/60 hover:scale-105 transition"
             >
               <PiPolygon className="h-4 w-4" />
             </Button>
@@ -103,7 +103,7 @@ export default function Project() {
 
           <div
             aria-hidden="true"
-            className="mx-2 h-8 w-[1.5px] bg-slate-200/80 rounded-sm bg-gradient-to-b from-slate-300/95 to-slate-400/95 shadow-sm"
+            className="mx-2 h-8 w-[1.5px] bg-slate-200/80 rounded-sm bg-gradient-to-b from-slate-300/95 to-slate-400/95"
           />
 
           <Button variant="outline" className="flex items-center gap-2 px-3">
@@ -119,7 +119,7 @@ export default function Project() {
           <Button
             variant="ghost"
             aria-label="Quick add"
-            className="p-2 hover:bg-slate-100/60 hover:scale-105 hover:shadow-sm transition"
+            className="p-2 hover:bg-slate-100/60 hover:scale-105 transition"
           >
             <LuSettings className="h-4 w-4" />
           </Button>

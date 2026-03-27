@@ -58,8 +58,8 @@ export function SignupForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <div className="rounded-3xl bg-gradient-to-br from-zinc-950 via-zinc-500 to-white p-[1px] shadow-[0_18px_48px_rgba(0,0,0,0.28),0_0_20px_rgba(255,255,255,0.1)]">
-        <Card className="overflow-hidden rounded-[calc(1.5rem-1px)] border-0 bg-background p-0">
+      <div className="rounded-3xl bg-background">
+        <Card className="overflow-hidden rounded-[calc(1.5rem-1px)] border-0 bg-background p-0 shadow-none">
           <CardContent className="grid p-0 md:grid-cols-2">
           <form className="p-6 md:p-8" onSubmit={handleSubmit}>
             <FieldGroup>

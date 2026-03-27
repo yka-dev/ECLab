@@ -1,6 +1,16 @@
 import { Link } from "react-router";
+import { ChevronDown } from "lucide-react";
 import type { Route } from "./+types/home";
 import { Button } from "~/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
+import { electricityConcepts } from "~/lib/electricity-concepts";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -15,7 +25,7 @@ export function meta({}: Route.MetaArgs) {
 export default function Home() {
   return (
     <div className="bg-muted min-h-svh">
-      <div className="flex min-h-svh w-full flex-col border border-zinc-200 bg-white shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
+      <div className="flex min-h-svh w-full flex-col border border-zinc-200 bg-white">
         <header className="border-b border-zinc-200 px-5 py-4 md:px-8">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr] md:items-center">
             <div className="text-center md:text-left">
@@ -27,6 +37,9 @@ export default function Home() {
             <div />
 
             <div className="flex items-center justify-center gap-2 md:justify-end">
+              <Button asChild variant="ghost" className="rounded-full px-5">
+                <Link to="/about">A propos de nous</Link>
+              </Button>
               <Button asChild variant="ghost" className="rounded-full px-5">
                 <Link to="/login">Login</Link>
               </Button>
@@ -49,10 +62,36 @@ export default function Home() {
               <p className="mx-auto max-w-2xl text-base leading-7 text-zinc-600 md:text-lg">
                 Inscrivez-vous pour commencer à créer vos projets.
               </p>
-              <div className="flex justify-center">
+              <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
                 <Button asChild size="lg" className="rounded-full px-8">
                   <Link to="/signup">Commencer</Link>
                 </Button>
+                <Button asChild size="lg" variant="outline" className="rounded-full px-8">
+                  <Link to="/teams">Teams</Link>
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="lg" variant="outline" className="rounded-full px-8">
+                      Concepts d'electricite
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="center" className="w-72">
+                    <DropdownMenuLabel>Notions niveau cegep</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {electricityConcepts.map((concept) => (
+                      <DropdownMenuItem asChild key={concept.slug}>
+                        <Link to={`/electricity-concepts#${concept.slug}`}>
+                          {concept.title}
+                        </Link>
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link to="/electricity-concepts">Voir toutes les definitions</Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
