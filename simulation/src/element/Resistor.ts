@@ -1,6 +1,10 @@
 import { Matrix } from 'ml-matrix';
 import { Component } from './Component';
 
+/**
+ * Représente une résistance et ajoute sa contribution (conductance) à la matrice G
+ * lors du 'stamp' pour l'analyse nodale modifiée (MNA).
+ */
 export class Resistor extends Component {
     resistance: number;
 
