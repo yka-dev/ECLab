@@ -12,7 +12,7 @@ import { Input } from "~/components/ui/input";
 import logoImage from "/LOGO.png";
 import { useState } from "react";
 import { toast } from "sonner";
-import { redirect } from "react-router";
+import { redirect, useNavigate } from "react-router";
 
 export function SignupForm({
   className,
@@ -23,6 +23,8 @@ export function SignupForm({
   const [retype, setRetype] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const navigate = useNavigate();
 
   const handleSubmit = (e: React.SubmitEvent) => {
     e.preventDefault();
@@ -39,6 +41,7 @@ export function SignupForm({
       headers: {
         "Content-Type": "application/json",
       },
+      credentials: "include",
       body: JSON.stringify({
         email,
         password,
@@ -50,7 +53,7 @@ export function SignupForm({
       } else {
         toast.success("Votre compte ECLab a été créé avec succès");
         setTimeout(() => {
-          redirect("/projects");
+          navigate("/projects")
         }, 1000);
       }
     });
