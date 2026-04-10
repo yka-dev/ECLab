@@ -1,9 +1,5 @@
 import { Component, StampContext } from './Component';
 
-/**
- * Représente une source de tension pour MNA.
- * Effectue le 'stamp' en ajoutant les équations auxiliaires (lignes/colonnes) et la valeur dans b.
- */
 export class VoltageSource extends Component {
     voltage: number;
     private mnaRow: number | null = null;
@@ -24,7 +20,7 @@ export class VoltageSource extends Component {
 
     stamp({ G, b, nodeIndexMap }: StampContext): void {
         if (this.mnaRow === null) {
-            throw new Error(` La source de tension ${this.id} na pas de ligne assignée dans la matrice MNA. `);
+            throw new Error(`La source de tension ${this.id} n'a pas de ligne MNA assignée.`);
         }
 
         const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);

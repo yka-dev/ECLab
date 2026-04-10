@@ -1,8 +1,4 @@
-/**
- * Web Worker de démonstration : construit un circuit de test, le résout avec MnaSolver
- * et poste la solution au thread principal.
- */
-
+// lance le solver quand le main thread envoie 'runTest'
 import { MnaSolver } from '../src/solver/MnaSolver';
 import { Circuit } from '../src/element/Circuit';
 
@@ -12,12 +8,12 @@ self.onmessage = (event: MessageEvent) => {
         return;
     }
 
-    const circuit: Circuit = Circuit.createRcTestCircuit();
+    const circuit = Circuit.createRcTestCircuit();
     const solver = new MnaSolver();
 
     const result = solver.solve(circuit.components, {
-    timeStep: 1e-4,
-    totalTime: 5e-3,
+        timeStep: 1e-4,
+        totalTime: 5e-3,
     });
 
     self.postMessage(result);

@@ -1,6 +1,8 @@
 import { Matrix, solve } from 'ml-matrix';
+import { Battery } from '../element/Battery.ts';
 import { Capacitor } from '../element/Capacitor.ts';
 import { Component, StampContext } from '../element/Component.ts';
+import { Led } from '../element/Led.ts';
 import { VoltageSource } from '../element/VoltageSource.ts';
 
 export interface TransientSolveOptions {
@@ -26,14 +28,15 @@ interface SolveResult {
 export class MnaSolver {
     solve(components: Component[], options: TransientSolveOptions = {}): SolveResult {
         const nodeSet = new Set<number>();
-        const voltageSources: VoltageSource[] = [];
+        // on regroupe tout ce qui a besoin d'une ligne MNA extra (sources de tension, batteries, leds)
+        const voltageSources: (VoltageSource | Battery | Led)[] = [];
         let hasCapacitor = false;
 
         components.forEach(component => {
             if (component.node1 !== 0) nodeSet.add(component.node1);
             if (component.node2 !== 0) nodeSet.add(component.node2);
 
-            if (component instanceof VoltageSource) {
+            if (component instanceof VoltageSource || component instanceof Battery || component instanceof Led) {
                 voltageSources.push(component);
             }
 
@@ -120,7 +123,7 @@ export class MnaSolver {
         return Matrix.columnVector(initialSolutionVector);
     }
 
-    private formatResult(solution: Matrix, nodes: number[], voltageSources: VoltageSource[]): SolveResult {
+    private formatResult(solution: Matrix, nodes: number[], voltageSources: (VoltageSource | Battery | Led)[]): SolveResult {
         const solutionVector = solution.to1DArray();
         const nodeVoltages: Record<string, number> = {};
         const sourceCurrents: Record<string, number> = {};
