@@ -95,7 +95,7 @@ export default function Projects() {
         {/* Vue vide */}
         {projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground">
-            <p className="text-lg font-medium">Vous n’avez encore aucun projet</p>
+            <p className="text-lg font-medium">Vous n'avez encore aucun projet</p>
             <p className="text-sm">Créez votre premier projet pour commencer.</p>
 
             <Button className="mt-6" onClick={() => setOpenCreate(true)}>
@@ -105,12 +105,10 @@ export default function Projects() {
           </div>
         ) : (
           <>
-            {/* Grille de projets */}
             <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {filteredProjects.map((project) => (
                 <Card key={project.id}>
                   <CardContent className="p-0">
-                    {/* Thumbnail */}
                     <div className="aspect-video w-full overflow-hidden rounded-t-lg">
                       <img
                         src={project.thumbnail}
@@ -119,7 +117,6 @@ export default function Projects() {
                       />
                     </div>
 
-                    {/* Nom + menu */}
                     <div className="flex items-center justify-between p-4">
                       <span className="truncate font-medium">
                         {project.name}

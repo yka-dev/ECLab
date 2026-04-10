@@ -38,7 +38,7 @@ export default function Home() {
 
             <div className="flex items-center justify-center gap-2 md:justify-end">
               <Button asChild variant="ghost" className="rounded-full px-5">
-                <Link to="/about">A propos de nous</Link>
+                <Link to="/about">À propos de nous</Link>
               </Button>
               <Button asChild variant="ghost" className="rounded-full px-5">
                 <Link to="/login">Login</Link>
@@ -72,12 +72,12 @@ export default function Home() {
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button size="lg" variant="outline" className="rounded-full px-8">
-                      Concepts d'electricite
+                      Concepts d'électricité
                       <ChevronDown className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="center" className="w-72">
-                    <DropdownMenuLabel>Notions niveau cegep</DropdownMenuLabel>
+                    <DropdownMenuLabel>Notions niveau cégep</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     {electricityConcepts.map((concept) => (
                       <DropdownMenuItem asChild key={concept.slug}>
@@ -88,15 +88,13 @@ export default function Home() {
                     ))}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild>
-                      <Link to="/electricity-concepts">Voir toutes les definitions</Link>
+                      <Link to="/electricity-concepts">Voir toutes les définitions</Link>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
             </div>
-
           </section>
-
         </main>
       </div>
     </div>

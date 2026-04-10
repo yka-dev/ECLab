@@ -7,7 +7,7 @@ export function meta({}: Route.MetaArgs) {
     { title: "ECLab | Teams" },
     {
       name: "description",
-      content: "Page des teams ECLab.",
+      content: "Page des équipes ECLab.",
     },
   ];
 }
@@ -30,14 +30,14 @@ export default function Teams() {
         <main className="flex flex-1 items-center justify-center px-5 py-10 md:px-8">
           <section className="w-full max-w-3xl space-y-6 text-center">
             <p className="text-sm font-medium uppercase tracking-[0.3em] text-zinc-500">
-              Teams
+              Équipes
             </p>
             <h1 className="text-4xl font-semibold tracking-tight text-zinc-950 md:text-5xl">
-              Les teams ECLab arriveront bientot
+              Les équipes ECLab arriveront bientôt
             </h1>
             <p className="mx-auto max-w-2xl text-base leading-7 text-zinc-600 md:text-lg">
-              Cette page servira a afficher toutes les teams. On pourra y
-              ajouter la liste, les details et la navigation plus tard.
+              Cette page servira à afficher toutes les équipes. On pourra y
+              ajouter la liste, les détails et la navigation plus tard.
             </p>
           </section>
         </main>

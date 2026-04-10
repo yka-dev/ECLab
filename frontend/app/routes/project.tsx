@@ -1,8 +1,8 @@
-import { useRef, useEffect } from "react";
+import { useRef } from "react";
 import { Button } from "~/components/ui/button";
 import { ButtonGroup } from "~/components/ui/button-group";
 import { PlusIcon } from "lucide-react";
-import { FiPlay, FiEye, FiPlus, FiZap, FiSettings } from "react-icons/fi";
+import { FiPlay } from "react-icons/fi";
 import { PiCursor, PiHandGrabbing, PiPause, PiPolygon } from "react-icons/pi";
 import { LuSettings } from "react-icons/lu";
 
