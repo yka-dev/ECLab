@@ -266,6 +266,7 @@ func main() {
 	router.Get("/projects", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
+			log.Println(err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -281,7 +282,7 @@ func main() {
 	})
 
 	// Routes pour manipuler un projet par id (GET/DELETE/PATCH)
-	router.HandleFunc("/project/{id}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -349,7 +350,7 @@ func main() {
 	})
 
 	// Mettre à jour le circuit d'un projet
-	router.Post("/project/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
+	router.Post("/projects/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -491,7 +492,7 @@ func validatePassword(password string) (string, error) {
 
 // getSessionFromRequest récupère la session à partir du cookie de la requête et la valide en base.
 func getSessionFromRequest(r *http.Request) (*repositery.Session, error) {
-	cookie, err := r.Cookie("session_id")
+	cookie, err := r.Cookie("eclab_session_id")
 	if err != nil {
 		return nil, fmt.Errorf("session cookie not found")
 	}
