@@ -3,6 +3,10 @@ import { Component } from '../element/Component';
 import { Resistor } from '../element/Resistor';
 import { VoltageSource } from '../element/VoltageSource';
 
+/**
+ * Conteneur de composants électriques.
+ * Fournit des utilitaires pour construire des circuits (ex. createSimpleTestCircuit).
+ */
 export class Circuit {
     components: Component[] = [];
 

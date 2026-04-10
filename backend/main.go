@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
@@ -26,14 +27,17 @@ var DB db.DB
 var Email email.Email
 
 func main() {
+	// Charge les variables d'environnement depuis .env (si présent)
 	godotenv.Load()
 
+	// Initialise la configuration (Env) depuis l'environnement
 	Env, err := env.InitEnv()
 	if err != nil {
 		log.Fatal("Failed to load environment variables: ", err)
 		return
 	}
 
+	// Connexion à la base de données
 	DB, err = db.New(Env.DATABASE_URL)
 	if err != nil {
 		log.Fatal("Failed to connect to database: ", err)
@@ -41,15 +45,27 @@ func main() {
 	}
 	defer DB.Close()
 
+	// Initialise le client email (ex: Brevo)
 	Email = email.New(Env.BREVO_API_KEY)
 
+	// Configure le routeur HTTP et CORS
 	router := chi.NewRouter()
+	router.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	}))
 
+	// Représentation simple des payloads d'auth
 	type AuthRequest struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 
+	// Route unique pour login/signup/logout (méthodes POST/GET/DELETE selon usage)
 	router.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost, http.MethodGet:
@@ -59,12 +75,14 @@ func main() {
 				return
 			}
 
+			// Validation et normalisation de l'email
 			email, err := validateEmail(request.Email)
 			if err != nil {
 				http.Error(w, "Invalid email address", http.StatusBadRequest)
 				return
 			}
 
+			// Validation du mot de passe (longueur minimale)
 			password, err := validatePassword(request.Password)
 			if err != nil {
 				http.Error(w, "Invalid password", http.StatusBadRequest)
@@ -72,6 +90,7 @@ func main() {
 			}
 
 			cookie := &http.Cookie{}
+			// Détermine l'action selon le chemin (login vs signup)
 			if strings.Contains(r.URL.Path, "login") {
 				cookie, err = login(r.Context(), email, password)
 				if err != nil {
@@ -86,10 +105,12 @@ func main() {
 				}
 			}
 
+			// Retourne le cookie de session
 			w.Header().Set("Set-Cookie", cookie.String())
 			w.WriteHeader(http.StatusOK)
 
 		case http.MethodDelete:
+			// Déconnexion : récupère la session et la supprime
 			session, err := getSessionFromRequest(r)
 			if err != nil {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -106,6 +127,7 @@ func main() {
 		}
 	})
 
+	// Route pour demander un email de réinitialisation (forgot password)
 	router.Post("/auth/forgot", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Email string `json:"email"`
@@ -129,6 +151,7 @@ func main() {
 			return
 		}
 
+		// Crée une requête de réinitialisation en base (avec date d'expiration)
 		newRequest, err := DB.CreateRequest(r.Context(), repositery.CreateRequestParams{
 			Type:      repositery.RequestsTypeResetPassword,
 			UserID:    user.ID,
@@ -139,7 +162,7 @@ func main() {
 			return
 		}
 
-		
+		// Envoie l'email de réinitialisation contenant un lien avec le token
 		if err := Email.SendPasswordResetEmail(r.Context(), user.Email, fmt.Sprintf("%s/reset-password?token=%s", Env.URL, newRequest.ID)); err != nil {
 			log.Printf("Failed to send password reset email : %s\n", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -149,6 +172,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	// Route pour appliquer la réinitialisation du mot de passe
 	router.Post("/auth/reset", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			RequestID   uuid.UUID `json:"request_id"`
@@ -173,6 +197,7 @@ func main() {
 			return
 		}
 
+		// Vérifie l'expiration du token
 		if newRequest.ExpiresAt.Before(time.Now()) {
 			DB.DeleteRequestByID(r.Context(), request.RequestID)
 			http.Error(w, "The request has expired", http.StatusRequestTimeout)
@@ -184,6 +209,7 @@ func main() {
 			return
 		}
 
+		// Met à jour le mot de passe utilisateur
 		newPasswordHash, err := hashPassword(newPassword)
 		if err != nil {
 			log.Printf("Failed to hash new password : %s\n", err)
@@ -200,6 +226,7 @@ func main() {
 			return
 		}
 
+		// Supprime toutes les sessions de l'utilisateur pour forcer la reconnexion
 		DB.DeleteSessionsByUserID(r.Context(), newRequest.UserID)
 
 		cookie := logout(r.Context(), nil)
@@ -207,6 +234,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	// CRUD projets : création et liste
 	router.Post("/project", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
@@ -254,6 +282,7 @@ func main() {
 		json.NewEncoder(w).Encode(projects)
 	})
 
+	// Routes pour manipuler un projet par id (GET/DELETE/PATCH)
 	router.HandleFunc("/project/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
@@ -321,6 +350,7 @@ func main() {
 
 	})
 
+	// Mettre à jour le circuit d'un projet
 	router.Post("/project/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
@@ -359,10 +389,12 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	// Démarrage du serveur HTTP
 	fmt.Printf("Starting server on port %s\n", Env.PORT)
 	http.ListenAndServe(Env.PORT, router)
 }
 
+// signup crée un nouvel utilisateur puis retourne un cookie de session.
 func signup(ctx context.Context, email string, password string) (*http.Cookie, error) {
 	hashedPassword, err := hashPassword(password)
 	if err != nil {
@@ -385,6 +417,7 @@ func signup(ctx context.Context, email string, password string) (*http.Cookie, e
 	return cookie, nil
 }
 
+// login valide les identifiants, crée une session en base et retourne un cookie.
 func login(ctx context.Context, email string, password string) (*http.Cookie, error) {
 	user, err := DB.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -406,8 +439,9 @@ func login(ctx context.Context, email string, password string) (*http.Cookie, er
 	return createAuthCookie(session.ID.String(), session.ExpiresAt), nil
 }
 
+// logout supprime la session fournie (si présente) et retourne un cookie expiré.
 func logout(ctx context.Context, session *repositery.Session) *http.Cookie {
-	if (session != nil) {
+	if session != nil {
 		DB.DeleteSessionByID(ctx, session.ID)
 	}
 	cookie := createAuthCookie("", time.Now().Add(-time.Hour))
@@ -415,9 +449,10 @@ func logout(ctx context.Context, session *repositery.Session) *http.Cookie {
 	return cookie
 }
 
+// createAuthCookie génère un cookie de session avec la valeur et la date d'expiration fournies.
 func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name:     "session_id",
+		Name:     "eclab_session_id",
 		Value:    value,
 		Expires:  expiresAt,
 		HttpOnly: false,
@@ -425,16 +460,19 @@ func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
 	}
 }
 
+// hashPassword génère un hash bcrypt pour un mot de passe en clair.
 func hashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(bytes), err
 }
 
+// comparePasswords compare un mot de passe en clair avec son hash bcrypt.
 func comparePasswords(password string, hashedPassword string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	return err == nil
 }
 
+// validateEmail vérifie la validité d'une adresse email et la normalise.
 func validateEmail(email string) (string, error) {
 	_, err := mail.ParseAddress(email)
 	if err != nil {
@@ -443,6 +481,7 @@ func validateEmail(email string) (string, error) {
 	return strings.TrimSpace(strings.ToLower(email)), nil
 }
 
+// validatePassword applique des règles simples sur le mot de passe (longueur minimale).
 func validatePassword(password string) (string, error) {
 	if len(password) < 8 {
 		return "", fmt.Errorf("password must be at least 8 characters long")
@@ -450,6 +489,7 @@ func validatePassword(password string) (string, error) {
 	return strings.TrimSpace(password), nil
 }
 
+// getSessionFromRequest récupère la session à partir du cookie de la requête et la valide en base.
 func getSessionFromRequest(r *http.Request) (*repositery.Session, error) {
 	cookie, err := r.Cookie("session_id")
 	if err != nil {

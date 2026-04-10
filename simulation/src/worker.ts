@@ -1,3 +1,8 @@
+/**
+ * Web Worker de démonstration : construit un circuit de test, le résout avec MnaSolver
+ * et poste la solution au thread principal.
+ */
+
 import { MnaSolver } from '../src/solver/MnaSolver';
 import { Circuit } from '../src/element/Circuit';
 

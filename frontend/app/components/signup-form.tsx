@@ -76,7 +76,7 @@ export function SignupForm({
                   type="email"
                   placeholder="m@example.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {setEmail(e.target.value); setLoading(false)}}
                   required
                 />
                 <FieldDescription>
@@ -92,7 +92,7 @@ export function SignupForm({
                       id="password"
                       type="password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value.trimStart())}
+                      onChange={(e) => {setPassword(e.target.value.trimStart()); setLoading(false)}}
                       required
                     />
                   </Field>
@@ -104,7 +104,7 @@ export function SignupForm({
                       id="confirm-password"
                       type="password"
                       value={retype}
-                      onChange={(e) => setRetype(e.target.value.trimStart())}
+                      onChange={(e) => {setRetype(e.target.value.trimStart()); setLoading(false)}}
                       required
                     />
                   </Field>
