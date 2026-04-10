@@ -11,7 +11,7 @@ import {
 } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import logoImage from "/LOGO.png";
-import { Link, redirect } from "react-router";
+import { Link, redirect, useNavigate} from "react-router";
 import { toast } from "sonner";
 
 export function LoginForm({
@@ -23,6 +23,8 @@ export function LoginForm({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const navigate = useNavigate();
+
   const handleSubmit = (e: React.SubmitEvent) => {
     e.preventDefault();
     setError("");
@@ -33,6 +35,7 @@ export function LoginForm({
       headers: {
         "Content-Type": "application/json",
       },
+      credentials: "include",
       body: JSON.stringify({ email, password }),
     }).then((response) => {
       if (!response.ok) {
@@ -41,7 +44,7 @@ export function LoginForm({
       } else {
         toast.success("Connexion réussie");
         setTimeout(() => {
-          redirect("/projects");
+          navigate("/projects")
         }, 1000);
       }
     });
