@@ -47,7 +47,7 @@ export class Circuit {
         return circuit;
     }
 
-    static createLedCircuit(): Circuit {
+        static createLedCircuit(): Circuit {
         const circuit = new Circuit();
 
         const B1 = new Battery("B1", 1, 0, 9, 0.5);   // batterie 9V, 0.5 ohm interne
@@ -69,7 +69,7 @@ export class Circuit {
     static createMixedCircuit(): Circuit {
         const circuit = new Circuit();
 
-        const B1   = new Battery("B1", 1, 0, 9, 0.5);
+                const B1   = new Battery("B1", 1, 0, 9, 0.5);
         const W1   = new Wire("W1", 1, 2);
         const S1   = new Switch("S1", 2, 3, true);
         const W2   = new Wire("W2", 3, 4);
@@ -87,7 +87,7 @@ export class Circuit {
         const W7   = new Wire("W7", 10, 11);
         const C2   = new Capacitor("C2", 11, 12, 47e-6);
         const W8   = new Wire("W8", 12, 13);
-        const I1   = new CurrentSource("I1", 13, 0, 0.01);
+const I1   = new CurrentSource("I1", 13, 0, 0.01);
 
         [B1, W1, S1, W2, W3, R1, W4, LED1, W5, W6, C1, W7, C2, W8, I1].forEach(c => circuit.addComponent(c));
 
