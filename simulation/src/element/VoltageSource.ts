@@ -1,6 +1,10 @@
 import { Matrix } from 'ml-matrix';
 import { Component } from './Component';
 
+/**
+ * Représente une source de tension pour MNA.
+ * Effectue le 'stamp' en ajoutant les équations auxiliaires (lignes/colonnes) et la valeur dans b.
+ */
 export class VoltageSource extends Component {
     voltage: number;
     index: number; 

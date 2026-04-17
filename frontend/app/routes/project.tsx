@@ -1,819 +1,1555 @@
-import { useRef, useEffect, useState, useCallback } from "react";
-import { Button } from "~/components/ui/button";
-import { FiPlay } from "react-icons/fi";
-import { PiCursor, PiHandGrabbing, PiPause, PiPolygon } from "react-icons/pi";
-import { LuSettings } from "react-icons/lu";
+/**
+ * Circuit Sandbox Editor
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Revision notes:
+ *  1. Light mode by default; theme persisted in localStorage.
+ *  2. Right sidebar removed — replaced with a canvas-anchored Radix popover.
+ *  3. Circuit → Netlist conversion layer (generateNetlist / netlistToString)
+ *     suitable for Modified Nodal Analysis (MNA).
+ *
+ * Install peer dependency if not already present:
+ *   npm install @radix-ui/react-popover
+ */
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  TYPES
-// ─────────────────────────────────────────────────────────────────────────────
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
 
-interface Point {
-  id: string;
-  x: number; // world coords
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const GRID = 24;
+const ZOOM_MIN = 0.12;
+const ZOOM_MAX = 6;
+const THEME_STORAGE_KEY = "circuit-sandbox-theme";
+
+// ─── Core Types ───────────────────────────────────────────────────────────────
+
+export interface Vec2 { x: number; y: number; }
+
+export interface Terminal {
+  /** Grid-unit offset from component origin */
+  x: number;
   y: number;
 }
 
-interface Wire {
+export type ComponentType =
+  | "resistor" | "capacitor" | "inductor"
+  | "vsource"  | "ground"   | "switch"  | "led";
+
+export type Rotation = 0 | 90 | 180 | 270;
+
+export interface Component {
   id: string;
-  startPointId: string;
-  endPointId: string | null;
+  type: ComponentType;
+  position: Vec2;
+  rotation: Rotation;
+  props: Record<string, unknown>;
 }
 
-interface Component {
-  id: string;
-  x: number;          // world coords — exact projection on wire, no grid-snap
-  y: number;
-  type: string;
-  angle: number;      // radians: 0 = horizontal, PI/2 = vertical
-  isOn: boolean;      // toggle state
-  pinAId?: string;
-  pinBId?: string;
+export interface Wire { id: string; points: Vec2[]; }
+
+export interface Circuit { components: Component[]; wires: Wire[]; }
+
+// ─── Component Property Schema ────────────────────────────────────────────────
+//
+// Single authoritative source for:
+//   • default prop values
+//   • form field rendering inside the popover
+//
+// No per-component switch is needed in rendering code.
+
+type PropFieldType = "number" | "boolean" | "select";
+
+interface PropFieldBase { label: string; type: PropFieldType; default: unknown; }
+interface NumberField extends PropFieldBase { type: "number"; default: number; min?: number; step?: number; }
+interface BoolField   extends PropFieldBase { type: "boolean"; default: boolean; }
+interface SelectField extends PropFieldBase { type: "select";  default: string;  options: string[]; }
+type PropField = NumberField | BoolField | SelectField;
+
+type ComponentPropertySchema = Record<string, PropField>;
+
+const PROP_SCHEMAS: Record<ComponentType, ComponentPropertySchema> = {
+  resistor:  { resistance:    { label: "Resistance (Ω)", type: "number",  default: 1000,    min: 0, step: 100 } },
+  capacitor: { capacitance:   { label: "Capacitance (F)",type: "number",  default: 1e-6,    min: 0 } },
+  inductor:  { inductance:    { label: "Inductance (H)", type: "number",  default: 1e-3,    min: 0 } },
+  vsource:   { voltage:       { label: "Voltage (V)",    type: "number",  default: 5,       step: 0.5 } },
+  ground:    {},
+  switch:    { closed:        { label: "Closed",         type: "boolean", default: false } },
+  led: {
+    color:          { label: "LED Color",      type: "select",  default: "red", options: ["red","green","blue","yellow","white"] },
+    forwardVoltage: { label: "Forward Vf (V)", type: "number",  default: 2.0,   min: 0, step: 0.1 },
+  },
+};
+
+function defaultPropsFromSchema(schema: ComponentPropertySchema): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(schema).map(([k, f]) => [k, f.default]));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Internal PropDef shape (for draw() compat) ───────────────────────────────
 
-const MINOR_GRID = 10;
-const MAJOR_GRID = 50;
+interface NumberPropDef { key: string; label: string; type: "number"; min?: number; step?: number; }
+interface BoolPropDef   { key: string; label: string; type: "boolean"; }
+interface SelectPropDef { key: string; label: string; type: "select";  options: string[]; }
+type PropDef = NumberPropDef | BoolPropDef | SelectPropDef;
 
-// ── Normalized icon space ──────────────────────────────────────────────────
-//
-//  The interrupteur icon is defined on a [-100, +100] world-unit axis.
-//  Everything below is in those normalized units; the canvas transform
-//  (translate + scale + rotate) converts them to screen pixels automatically.
-//
-//  COMP_HALF = 35 world-px at zoom=1  (tune freely)
-const COMP_HALF = 35; // half-span of icon in world units
+// ─── Component Definition ─────────────────────────────────────────────────────
 
-// ── Fixed-stroke minimum ──────────────────────────────────────────────────
-//  Lines must never be thinner than MIN_STROKE_PX screen pixels.
-const MIN_STROKE_PX = 1.5;
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  TASK 1 — `getScaledIcon(zoomLevel)`
-//
-//  Returns the parameters needed to draw the icon at the given zoom level.
-//  The icon is always drawn in world space (ctx already has the world
-//  transform applied), so `worldHalf` is constant.  Only the stroke weight
-//  needs to compensate for zoom.
-//
-//  "Fixed-Stroke": lineWidth = max(MIN_STROKE_PX / zoomLevel, MIN_STROKE_PX / zoomLevel)
-//  In world units that means:  lineWidth = MIN_STROKE_PX / zoomLevel
-//  which equals MIN_STROKE_PX screen pixels at every zoom level, but never
-//  shrinks below that floor.
-// ─────────────────────────────────────────────────────────────────────────────
-function getScaledIcon(zoomLevel: number) {
-  const worldHalf = COMP_HALF;
-
-  // Keep stroke readable but allow slight scaling
-  const strokeWidth = Math.max(1 / zoomLevel, 0.8);
-
-  // Let dots scale naturally (NO forced constant size)
-  const dotRadius = 2.2 / zoomLevel;
-
-  // Perfect symmetry around center
-  const pivotOffset = worldHalf * 0.5;
-
-  // Make lever reach the other side cleanly
-  const armLength = worldHalf;
-
-  return { worldHalf, strokeWidth, dotRadius, pivotOffset, armLength };
+interface ComponentDef {
+  label: string;
+  symbol: string;
+  color: string; // light-mode schematic color
+  terminals: Terminal[];
+  defaultProps: Record<string, unknown>;
+  propDefs: PropDef[];
+  draw: (ctx: CanvasRenderingContext2D, comp: Component, selected: boolean, hovered: boolean) => void;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  TASK 3 — `drawInterrupteurSymbol(ctx, scale, isOn)`
-//
-//  Draws the IEC schematic switch symbol centred at (0, 0) in local space.
-//  The canvas transform (translate to world pos + rotate to wire angle) must
-//  already be applied by the caller.
-//
-//  ON  state: lever bridges the two terminals (horizontal, closed)
-//  OFF state: lever is at −45° (open, classic schematic)
-// ─────────────────────────────────────────────────────────────────────────────
-function drawInterrupteurSymbol(
-  ctx: CanvasRenderingContext2D,
-  scale: number,
-  isOn: boolean
-) {
-  const { worldHalf, strokeWidth, dotRadius, pivotOffset, armLength } =
-    getScaledIcon(scale);
+// ─── Utilities ────────────────────────────────────────────────────────────────
 
-  ctx.save();
-  ctx.strokeStyle = isOn ? "#1d4ed8" : "#1e293b";
-  ctx.fillStyle   = ctx.strokeStyle;
-  ctx.lineCap     = "round";
-  ctx.lineJoin    = "round";
-  ctx.lineWidth   = strokeWidth;
+const snap    = (v: number): number => Math.round(v / GRID) * GRID;
+const snapVec = (v: Vec2): Vec2    => ({ x: snap(v.x), y: snap(v.y) });
+const dist    = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
+const uid     = (): string => Math.random().toString(36).slice(2, 9);
 
-  // ── FULL LINE (wire axis reference)
-  ctx.beginPath();
-  ctx.moveTo(-worldHalf, 0);
-  ctx.lineTo(worldHalf, 0);
-  ctx.stroke();
+const s2w = (sx: number, sy: number, cam: Camera): Vec2 => ({
+  x: (sx - cam.x) / cam.z, y: (sy - cam.y) / cam.z,
+});
+const w2s = (wx: number, wy: number, cam: Camera): Vec2 => ({
+  x: wx * cam.z + cam.x, y: wy * cam.z + cam.y,
+});
 
-  // ── Left pivot
-  ctx.beginPath();
-  ctx.arc(-pivotOffset, 0, dotRadius, 0, Math.PI * 2);
-  ctx.fill();
+// ─── Formatters ───────────────────────────────────────────────────────────────
 
-  // ── Right pivot
-  ctx.beginPath();
-  ctx.arc(pivotOffset, 0, dotRadius, 0, Math.PI * 2);
-  ctx.fill();
-
-  // ── Lever
-  const leverAngle = isOn ? 0 : -Math.PI / 4;
-
-  const tipX = -pivotOffset + Math.cos(leverAngle) * armLength;
-  const tipY = Math.sin(leverAngle) * armLength;
-
-  ctx.beginPath();
-  ctx.moveTo(-pivotOffset, 0);
-  ctx.lineTo(tipX, tipY);
-  ctx.stroke();
-
-  ctx.restore();
+function fmtOhm(v: number): string {
+  if (v >= 1e6) return `${+(v/1e6).toPrecision(3)}MΩ`;
+  if (v >= 1e3) return `${+(v/1e3).toPrecision(3)}kΩ`;
+  return `${+v.toPrecision(3)}Ω`;
+}
+function fmtFarad(v: number): string {
+  if (v >= 1)    return `${+v.toPrecision(3)}F`;
+  if (v >= 1e-3) return `${+(v*1e3).toPrecision(3)}mF`;
+  if (v >= 1e-6) return `${+(v*1e6).toPrecision(3)}μF`;
+  return `${+(v*1e9).toPrecision(3)}nF`;
+}
+function fmtHenry(v: number): string {
+  if (v >= 1)    return `${+v.toPrecision(3)}H`;
+  if (v >= 1e-3) return `${+(v*1e3).toPrecision(3)}mH`;
+  return `${+(v*1e6).toPrecision(3)}μH`;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  TASK 2 — `snapAndOrient(drop, wire)`
-//
-//  Given a drop point and a wire segment, returns:
-//    • snapX / snapY  — the exact projection of the drop onto the segment
-//    • angle          — the wire's orientation angle in [0, π)
-//    • isVertical     — true when |x1−x2| < |y1−y2|
-//
-//  Uses the distance-to-segment formula (works for ALL orientations):
-//
-//    t   = clamp( dot(AP, AB) / dot(AB,AB), 0, 1 )
-//    proj = A + t·AB
-//    dist = |P − proj|
-//
-//  For a vertical wire: AB = (0, dy), dot(AP,AB) = dy*(py−ay),
-//  dot(AB,AB) = dy² → t = (py−ay)/dy  — clean, no NaN.
-//
-//  If the wire is vertical the component's angle is set to PI/2 so the symbol
-//  is rotated 90° and its pin axis aligns with the vertical wire.
-//  The snap X is forced to exactly the wire's X to eliminate the "jump" artefact.
-// ─────────────────────────────────────────────────────────────────────────────
-function snapAndOrient(
-  dropX: number,
-  dropY: number,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number
-): { snapX: number; snapY: number; angle: number; isVertical: boolean; dist: number } {
-  const abx = x2 - x1, aby = y2 - y1;
-  const len2 = abx * abx + aby * aby;
+// ─── Schematic colors (accessible on both white & dark canvas) ────────────────
 
-  // Zero-length segment guard
-  if (len2 === 0) {
-    return { snapX: x1, snapY: y1, angle: 0, isVertical: false, dist: Math.hypot(dropX - x1, dropY - y1) };
-  }
+const colSel  = "#2563eb"; // blue — selected
+const colHov  = "#7c3aed"; // violet — hovered
 
-  // Clamped projection parameter
-  const t = Math.max(0, Math.min(1, ((dropX - x1) * abx + (dropY - y1) * aby) / len2));
+// ─── Component Definitions ────────────────────────────────────────────────────
 
-  // Projected point (exact, no grid-snap)
-  const projX = x1 + t * abx;
-  const projY = y1 + t * aby;
-  const dist  = Math.hypot(dropX - projX, dropY - projY);
+const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
 
-  // Orientation: vertical when the wire runs more up/down than left/right
-  const isVertical = Math.abs(x1 - x2) < Math.abs(y1 - y2);
+  resistor: {
+    label: "Resistor", symbol: "R", color: "#92400e",
+    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.resistor),
+    propDefs: [{ key:"resistance", label:"Resistance (Ω)", type:"number", min:0, step:100 }],
+    draw(ctx, comp, sel, hov) {
+      const w = GRID*1.35, h = GRID*0.5, col = sel ? colSel : hov ? colHov : "#92400e";
+      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.strokeRect(-w/2, -h/2, w, h);
+      ctx.beginPath();
+      ctx.moveTo(-GRID*2,0); ctx.lineTo(-w/2,0);
+      ctx.moveTo(w/2,0); ctx.lineTo(GRID*2,0);
+      ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
+      ctx.fillText(fmtOhm(comp.props.resistance as number), 0, -h/2-5);
+    },
+  },
 
-  // Angle in [0, π) — drives ctx.rotate()
-  const rawAngle = Math.atan2(aby, abx);
-  const angle    = ((rawAngle % Math.PI) + Math.PI) % Math.PI;
+  capacitor: {
+    label: "Capacitor", symbol: "C", color: "#065f46",
+    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.capacitor),
+    propDefs: [{ key:"capacitance", label:"Capacitance (F)", type:"number", min:0 }],
+    draw(ctx, comp, sel, hov) {
+      const gap = 7, col = sel ? colSel : hov ? colHov : "#065f46";
+      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.moveTo(-GRID*2,0); ctx.lineTo(-gap,0);
+      ctx.moveTo(gap,0); ctx.lineTo(GRID*2,0);
+      ctx.stroke();
+      ctx.lineWidth = sel ? 3 : 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-gap,-GRID*0.7); ctx.lineTo(-gap,GRID*0.7);
+      ctx.moveTo(gap,-GRID*0.7); ctx.lineTo(gap,GRID*0.7);
+      ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
+      ctx.fillText(fmtFarad(comp.props.capacitance as number), 0, -GRID*0.7-5);
+    },
+  },
 
-  return {
-    // Force the snap-X onto the wire's x-coordinate when vertical to eliminate drift
-    snapX: isVertical ? x1 : projX,
-    snapY: projY,
-    angle,
-    isVertical,
-    dist,
-  };
-}
+  inductor: {
+    label: "Inductor", symbol: "L", color: "#4c1d95",
+    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.inductor),
+    propDefs: [{ key:"inductance", label:"Inductance (H)", type:"number", min:0 }],
+    draw(ctx, comp, sel, hov) {
+      const col = sel ? colSel : hov ? colHov : "#4c1d95";
+      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.moveTo(-GRID*2,0); ctx.lineTo(-GRID*1.2,0);
+      for (let i=0; i<4; i++) ctx.arc(-GRID*1.2+i*GRID*0.6+GRID*0.3, 0, GRID*0.3, Math.PI, 0);
+      ctx.lineTo(GRID*2,0); ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
+      ctx.fillText(fmtHenry(comp.props.inductance as number), 0, -GRID*0.4-5);
+    },
+  },
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Misc helpers
-// ─────────────────────────────────────────────────────────────────────────────
+  vsource: {
+    label: "Voltage Source", symbol: "V", color: "#991b1b",
+    terminals: [{ x:0, y:-2 }, { x:0, y:2 }],
+    defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.vsource),
+    propDefs: [{ key:"voltage", label:"Voltage (V)", type:"number", step:0.5 }],
+    draw(ctx, comp, sel, hov) {
+      const r = GRID*0.85, col = sel ? colSel : hov ? colHov : "#991b1b";
+      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0,-GRID*2); ctx.lineTo(0,-r);
+      ctx.moveTo(0,r); ctx.lineTo(0,GRID*2);
+      ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.font = "bold 10px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
+      ctx.fillText("+", 0, -GRID*0.22); ctx.fillText("−", 0, GRID*0.42);
+      ctx.font = "bold 9px 'JetBrains Mono',monospace";
+      ctx.fillText(`${comp.props.voltage as number}V`, 0, -r-5);
+    },
+  },
 
-function uid(prefix = "") {
-  return prefix + Math.random().toString(36).slice(2, 9);
-}
+  ground: {
+    label: "Ground", symbol: "GND", color: "#1f2937",
+    terminals: [{ x:0, y:-1 }],
+    defaultProps: {},
+    propDefs: [],
+    draw(ctx, _comp, sel, hov) {
+      const col = sel ? colSel : hov ? colHov : "#1f2937";
+      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.beginPath(); ctx.moveTo(0,-GRID); ctx.lineTo(0,0); ctx.stroke();
+      const bars = [{ w:0.75, y:0 }, { w:0.5, y:GRID*0.33 }, { w:0.25, y:GRID*0.66 }];
+      for (const b of bars) { ctx.beginPath(); ctx.moveTo(-b.w*GRID,b.y); ctx.lineTo(b.w*GRID,b.y); ctx.stroke(); }
+    },
+  },
 
-function snapToGrid(val: number, grid: number): number {
-  return Math.round(val / grid) * grid;
-}
+  switch: {
+    label: "Switch", symbol: "SW", color: "#14532d",
+    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.switch),
+    propDefs: [{ key:"closed", label:"Closed", type:"boolean" }],
+    draw(ctx, comp, sel, hov) {
+      const col = sel ? colSel : hov ? colHov : "#14532d", r = GRID*0.2;
+      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.moveTo(-GRID*2,0); ctx.lineTo(-GRID,0);
+      ctx.moveTo(GRID,0); ctx.lineTo(GRID*2,0);
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(-GRID,0,r,0,Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(GRID,0,r,0,Math.PI*2); ctx.stroke();
+      ctx.beginPath();
+      if (comp.props.closed) { ctx.moveTo(-GRID+r,0); ctx.lineTo(GRID-r,0); }
+      else { ctx.moveTo(-GRID+r*0.7,-r*0.7); ctx.lineTo(GRID*0.35,-GRID*0.5); }
+      ctx.stroke();
+    },
+  },
 
-function drawFallbackSymbol(
-  ctx: CanvasRenderingContext2D,
-  type: string,
-  size: number,
-  scale: number
-) {
-  const icons: Record<string, string> = { resistance: "Ω", batterie: "🔋", led: "💡" };
-  const icon = icons[type] ?? "?";
-  ctx.save();
-  ctx.font = `${size * 1.1}px system-ui, "Segoe UI Emoji", serif`;
-  ctx.textAlign    = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle    = "#0f172a";
-  ctx.fillText(icon, 0, 0);
-  ctx.restore();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  MAIN COMPONENT
-// ─────────────────────────────────────────────────────────────────────────────
-
-export default function Project() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [renderTick, setRenderTick] = useState(0);
-  const redraw = useCallback(() => setRenderTick(t => t + 1), []);
-
-  const [tool, setTool] = useState<"cursor" | "hand" | "wires">("cursor");
-
-  const offsetRef = useRef({ x: 0, y: 0 });
-  const scaleRef  = useRef(1);
-
-  const [points,     setPoints]     = useState<Point[]>([]);
-  const [wires,      setWires]      = useState<Wire[]>([]);
-  const [components, setComponents] = useState<Component[]>([]);
-
-  const mousePosRef       = useRef({ x: 0, y: 0 });
-  const activeWireIdRef   = useRef<string | null>(null);
-  const isPanningRef      = useRef(false);
-  const panStartRef       = useRef({ x: 0, y: 0 });
-  const panStartOffsetRef = useRef({ x: 0, y: 0 });
-
-  // ── Coordinate helpers ──────────────────────────────────────────────────
-
-  function screenToWorld(sx: number, sy: number) {
-    const s = scaleRef.current, o = offsetRef.current;
-    return { x: (sx - o.x) / s, y: (sy - o.y) / s };
-  }
-
-  function findNearPoint(wx: number, wy: number, pts: Point[], radius = MINOR_GRID * 0.6): Point | null {
-    for (const p of pts) {
-      if (Math.hypot(p.x - wx, p.y - wy) <= radius) return p;
-    }
-    return null;
-  }
-
-  // ── onDropComponent ──────────────────────────────────────────────────────
-  //
-  //  Implements TASK 2 end-to-end:
-  //  1. Finds the nearest finished wire using snapAndOrient()
-  //  2. Detects horizontal vs vertical
-  //  3. Snaps component centre precisely onto the wire
-  //  4. Lays pins along the wire unit vector (not always horizontally)
-  //  5. Splits the host wire into two segments around the component pins
-  // ────────────────────────────────────────────────────────────────────────
-
-  function onDropComponent(type: string, dropX: number, dropY: number): boolean {
-    const THRESHOLD = 14; // world-px — generous hit area
-
-    const pointMap = new Map(points.map(p => [p.id, p]));
-
-    let bestWire: Wire | null = null;
-    let bestSnap: ReturnType<typeof snapAndOrient> | null = null;
-
-    for (const w of wires) {
-      if (w.endPointId === null) continue;
-      const a = pointMap.get(w.startPointId);
-      const b = pointMap.get(w.endPointId);
-      if (!a || !b) continue;
-
-      const snap = snapAndOrient(dropX, dropY, a.x, a.y, b.x, b.y);
-      if (!bestSnap || snap.dist < bestSnap.dist) {
-        bestWire = w;
-        bestSnap = snap;
+  led: {
+    label: "LED", symbol: "▶", color: "#9a3412",
+    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.led),
+    propDefs: [
+      { key:"color", label:"LED Color", type:"select", options:["red","green","blue","yellow","white"] },
+      { key:"forwardVoltage", label:"Forward Vf (V)", type:"number", min:0, step:0.1 },
+    ],
+    draw(ctx, comp, sel, hov) {
+      const col = sel ? colSel : hov ? colHov : "#9a3412", s = GRID*0.7;
+      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.moveTo(-GRID*2,0); ctx.lineTo(-s,0);
+      ctx.moveTo(s,0); ctx.lineTo(GRID*2,0);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-s,-s); ctx.lineTo(-s,s); ctx.lineTo(s,0); ctx.closePath();
+      ctx.stroke();
+      ctx.fillStyle = sel ? "rgba(37,99,235,.15)" : `${comp.props.color as string}33`; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s,-s); ctx.lineTo(s,s); ctx.stroke();
+      ctx.lineWidth = 1.2;
+      for (let i=0; i<2; i++) {
+        const ox=GRID*0.3+i*GRID*0.28, oy=-GRID*0.6-i*GRID*0.1;
+        ctx.beginPath(); ctx.moveTo(ox,oy); ctx.lineTo(ox+GRID*0.28,oy-GRID*0.32); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ox+GRID*0.28,oy-GRID*0.32); ctx.lineTo(ox+GRID*0.18,oy-GRID*0.32);
+        ctx.moveTo(ox+GRID*0.28,oy-GRID*0.32); ctx.lineTo(ox+GRID*0.28,oy-GRID*0.2);
+        ctx.stroke();
       }
-    }
+    },
+  },
+};
 
-    if (!bestWire || !bestSnap || bestSnap.dist > THRESHOLD) return false;
+// ─── Camera ───────────────────────────────────────────────────────────────────
 
-    const cx = bestSnap.snapX;
-    const cy = bestSnap.snapY;
+interface Camera { x: number; y: number; z: number; }
 
-    // Unit vector along the wire
-    const startPt = pointMap.get(bestWire.startPointId)!;
-    const endPt   = pointMap.get(bestWire.endPointId!)!;
-    const wLen    = Math.hypot(endPt.x - startPt.x, endPt.y - startPt.y) || 1;
-    const ux      = (endPt.x - startPt.x) / wLen;
-    const uy      = (endPt.y - startPt.y) / wLen;
+// ─── World-space terminal positions ──────────────────────────────────────────
 
-    // Pin gap along the wire unit vector
-    const GAP = COMP_HALF * 0.55;
-    const paX = cx - ux * GAP,  paY = cy - uy * GAP;
-    const pbX = cx + ux * GAP,  pbY = cy + uy * GAP;
+function termWorlds(comp: Component): Vec2[] {
+  const def = COMPONENT_DEFS[comp.type];
+  if (!def) return [];
+  const rad = (comp.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  return def.terminals.map((t) => {
+    const wx = t.x * GRID, wy = t.y * GRID;
+    return { x: comp.position.x + wx*cos - wy*sin, y: comp.position.y + wx*sin + wy*cos };
+  });
+}
 
-    const existingA = findNearPoint(paX, paY, points, MINOR_GRID * 0.8);
-    const existingB = findNearPoint(pbX, pbY, points, MINOR_GRID * 0.8);
-    const ptA: Point = existingA ?? { id: uid("pt"), x: paX, y: paY };
-    const ptB: Point = existingB ?? { id: uid("pt"), x: pbX, y: pbY };
+// ─── Orthogonal routing ───────────────────────────────────────────────────────
 
-    setPoints(prev => {
-      const list = [...prev];
-      if (!existingA) list.push(ptA);
-      if (!existingB) list.push(ptB);
-      return list;
-    });
+function orthoRoute(a: Vec2, b: Vec2): Vec2[] {
+  const pts: Vec2[] = [{ ...a }];
+  if (a.x !== b.x) pts.push({ x: b.x, y: a.y });
+  if (pts[pts.length-1].x !== b.x || pts[pts.length-1].y !== b.y) pts.push({ ...b });
+  else if (pts.length === 1) pts.push({ ...b });
+  return pts;
+}
 
-    const capturedWire = bestWire;
-    setWires(prev => {
-      const rest = prev.filter(w => w.id !== capturedWire.id);
-      return [
-        ...rest,
-        { id: uid("wire"), startPointId: capturedWire.startPointId, endPointId: ptA.id },
-        { id: uid("wire"), startPointId: ptB.id, endPointId: capturedWire.endPointId as string },
-      ];
-    });
+// ─── Snap to nearest terminal / wire endpoint ────────────────────────────────
 
-    setComponents(prev => [
-      ...prev,
-      {
-        id:     uid("cmp"),
-        x:      cx,
-        y:      cy,
-        type,
-        angle:  bestSnap!.angle,
-        isOn:   false,
-        pinAId: ptA.id,
-        pinBId: ptB.id,
-      },
-    ]);
+function snapToNearby(components: Component[], wires: Wire[], world: Vec2, radius = GRID * 0.85): Vec2 {
+  let best = radius, pt = snapVec(world);
+  for (const c of components) for (const t of termWorlds(c)) { const d = dist(t, world); if (d < best) { best = d; pt = snapVec(t); } }
+  for (const w of wires) for (const p of w.points) { const d = dist(p, world); if (d < best) { best = d; pt = snapVec(p); } }
+  return pt;
+}
 
-    redraw();
-    return true;
+// ─── Hit testing ─────────────────────────────────────────────────────────────
+
+function hitComponent(comp: Component, pt: Vec2): boolean {
+  const ts = termWorlds(comp);
+  const allX = [comp.position.x, ...ts.map(t => t.x)];
+  const allY = [comp.position.y, ...ts.map(t => t.y)];
+  const pad = GRID * 0.85;
+  return pt.x >= Math.min(...allX)-pad && pt.x <= Math.max(...allX)+pad
+      && pt.y >= Math.min(...allY)-pad && pt.y <= Math.max(...allY)+pad;
+}
+
+function hitWire(wire: Wire, pt: Vec2): boolean {
+  const ps = wire.points, thr = GRID * 0.42;
+  for (let i = 0; i < ps.length-1; i++) {
+    const a = ps[i], b = ps[i+1];
+    const l2 = (b.x-a.x)**2 + (b.y-a.y)**2;
+    if (l2 < 1) continue;
+    let t = ((pt.x-a.x)*(b.x-a.x)+(pt.y-a.y)*(b.y-a.y))/l2;
+    t = Math.max(0, Math.min(1, t));
+    if (Math.hypot(pt.x-(a.x+t*(b.x-a.x)), pt.y-(a.y+t*(b.y-a.y))) < thr) return true;
+  }
+  return false;
+}
+
+function hitTest(components: Component[], wires: Wire[], pt: Vec2): string | null {
+  for (let i = components.length-1; i >= 0; i--) if (hitComponent(components[i], pt)) return components[i].id;
+  for (let i = wires.length-1; i >= 0; i--)  if (hitWire(wires[i], pt)) return wires[i].id;
+  return null;
+}
+
+// ─── Junction detection ───────────────────────────────────────────────────────
+
+function findJunctions(components: Component[], wires: Wire[]): Vec2[] {
+  const result: Vec2[] = [], candidates: Vec2[] = [];
+  for (const c of components) for (const t of termWorlds(c)) candidates.push(t);
+  for (const w of wires) { candidates.push(w.points[0]); candidates.push(w.points[w.points.length-1]); }
+  for (const pt of candidates) {
+    let count = 0;
+    for (const w of wires) for (const wp of w.points) if (dist(pt, wp) < 2) count++;
+    for (const c of components) for (const t of termWorlds(c)) if (dist(pt, t) < 2) count++;
+    if (count >= 3 && !result.some(r => dist(r, pt) < 2)) result.push(pt);
+  }
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── NETLIST GENERATOR  (MNA-compatible) ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type NetlistComponent =
+  | { type: "R"; name: string; n1: string; n2: string; value: number }
+  | { type: "V"; name: string; n1: string; n2: string; value: number }
+  | { type: "C"; name: string; n1: string; n2: string; value: number }
+  | { type: "L"; name: string; n1: string; n2: string; value: number }
+  | { type: "D"; name: string; n1: string; n2: string; vf: number   }
+  | { type: "S"; name: string; n1: string; n2: string; state: boolean };
+
+export interface Netlist {
+  nodes: string[];
+  components: NetlistComponent[];
+  warnings: string[];
+}
+
+/**
+ * Union-Find over snapped Vec2 keys for node grouping.
+ */
+class UnionFind {
+  private parent = new Map<string, string>();
+
+  private key(p: Vec2): string { return `${snap(p.x)},${snap(p.y)}`; }
+
+  add(p: Vec2): string {
+    const k = this.key(p);
+    if (!this.parent.has(k)) this.parent.set(k, k);
+    return k;
   }
 
-  // ── Toggle switch on cursor click ───────────────────────────────────────
+  find(p: Vec2): string {
+    let k = this.add(p);
+    while (this.parent.get(k) !== k) {
+      // path-compression one step
+      this.parent.set(k, this.parent.get(this.parent.get(k)!)!);
+      k = this.parent.get(k)!;
+    }
+    return k;
+  }
 
-  function tryToggleComponent(sx: number, sy: number) {
-    const world = screenToWorld(sx, sy);
-    const scale = scaleRef.current;
-    const HIT   = COMP_HALF / scale * 1.2; // screen-space hit radius
+  union(a: Vec2, b: Vec2): void {
+    this.add(a); this.add(b);
+    const ra = this.find(a), rb = this.find(b);
+    if (ra !== rb) this.parent.set(ra, rb);
+  }
+}
 
-    setComponents(prev =>
-      prev.map(cmp => {
-        const dx = (cmp.x * scale + offsetRef.current.x) - sx;
-        const dy = (cmp.y * scale + offsetRef.current.y) - sy;
-        if (Math.hypot(dx, dy) < HIT * scale) {
-          return { ...cmp, isOn: !cmp.isOn };
+/**
+ * Convert the current circuit into an MNA-ready Netlist.
+ *
+ * Algorithm
+ * ─────────
+ * 1. Walk every wire, union-ing consecutive points into one electrical node.
+ * 2. Register all component terminals and connect them to wire endpoints
+ *    that are within snapping distance.
+ * 3. Any terminal of a "ground" component forces its root to node "0".
+ * 4. Remaining roots get sequential integer IDs ("1", "2", …).
+ * 5. Each component is mapped to a NetlistComponent.
+ */
+export function generateNetlist(circuit: Circuit): Netlist {
+  const warnings: string[] = [];
+  const uf = new UnionFind();
+
+  // 1. Union wire segments
+  for (const wire of circuit.wires) {
+    if (wire.points.length === 0) continue;
+    wire.points.forEach(p => uf.add(p));
+    for (let i = 0; i < wire.points.length-1; i++) uf.union(wire.points[i], wire.points[i+1]);
+  }
+
+  // 2. Register terminals, connect to nearby wire points
+  for (const comp of circuit.components) {
+    for (const tw of termWorlds(comp)) {
+      uf.add(tw);
+      for (const wire of circuit.wires) {
+        for (const wp of wire.points) {
+          if (dist(tw, wp) < GRID * 0.5) uf.union(tw, wp);
         }
-        return cmp;
-      })
-    );
-    redraw();
+      }
+    }
   }
 
-  // ─── Draw ─────────────────────────────────────────────────────────────────
+  // 3. Ground roots → node "0"
+  const groundRoots = new Set<string>();
+  for (const comp of circuit.components) {
+    if (comp.type === "ground") {
+      const tw = termWorlds(comp)[0];
+      if (tw) groundRoots.add(uf.find(tw));
+    }
+  }
+  if (groundRoots.size === 0) warnings.push("No ground component found. Node '0' will not be defined.");
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx   = canvas.getContext("2d")!;
-    const W     = canvas.width, H = canvas.height;
-    const scale = scaleRef.current;
-    const off   = offsetRef.current;
+  // 4. Assign node IDs
+  const rootToNode = new Map<string, string>();
+  for (const gr of groundRoots) rootToNode.set(gr, "0");
+  let nextNode = 1;
 
-    ctx.clearRect(0, 0, W, H);
+  const nodeOf = (pt: Vec2): string => {
+    const root = uf.find(pt);
+    if (!rootToNode.has(root)) rootToNode.set(root, String(nextNode++));
+    return rootToNode.get(root)!;
+  };
+
+  // 5. Map components
+  const nlComps: NetlistComponent[] = [];
+  const counters: Record<string, number> = {};
+  const nextName = (prefix: string) => { counters[prefix] = (counters[prefix] ?? 0) + 1; return `${prefix}${counters[prefix]}`; };
+
+  for (const comp of circuit.components) {
+    const tw = termWorlds(comp);
+    switch (comp.type) {
+      case "resistor":
+        nlComps.push({ type: "R", name: nextName("R"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), value: comp.props.resistance as number });
+        break;
+      case "capacitor":
+        nlComps.push({ type: "C", name: nextName("C"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), value: comp.props.capacitance as number });
+        break;
+      case "inductor":
+        nlComps.push({ type: "L", name: nextName("L"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), value: comp.props.inductance as number });
+        break;
+      case "vsource":
+        nlComps.push({ type: "V", name: nextName("V"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), value: comp.props.voltage as number });
+        break;
+      case "led":
+        nlComps.push({ type: "D", name: nextName("D"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), vf: comp.props.forwardVoltage as number });
+        break;
+      case "switch":
+        nlComps.push({ type: "S", name: nextName("S"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), state: comp.props.closed as boolean });
+        break;
+      case "ground":
+        break; // handled via node "0" assignment only
+    }
+  }
+
+  // Collect nodes and detect floating ones
+  const nodeSet = new Set<string>();
+  for (const nc of nlComps) { nodeSet.add(nc.n1); nodeSet.add(nc.n2); }
+  const nodeCount = new Map<string, number>();
+  for (const nc of nlComps) {
+    nodeCount.set(nc.n1, (nodeCount.get(nc.n1) ?? 0) + 1);
+    nodeCount.set(nc.n2, (nodeCount.get(nc.n2) ?? 0) + 1);
+  }
+  for (const [node, count] of nodeCount) {
+    if (count < 2) warnings.push(`Node ${node} appears to be floating (only 1 connection).`);
+  }
+
+  const nodes = Array.from(nodeSet).sort((a, b) => {
+    const na = parseInt(a), nb = parseInt(b);
+    return (isNaN(na) || isNaN(nb)) ? a.localeCompare(b) : na - nb;
+  });
+
+  return { nodes, components: nlComps, warnings };
+}
+
+/**
+ * Serialize a Netlist to SPICE-style text.
+ *
+ * Example:
+ *   V1 1 0 5
+ *   R1 1 2 1000
+ *   D1 2 0 VF=2
+ */
+export function netlistToString(netlist: Netlist): string {
+  const lines: string[] = [];
+  for (const nc of netlist.components) {
+    switch (nc.type) {
+      case "R": case "C": case "L": case "V":
+        lines.push(`${nc.name} ${nc.n1} ${nc.n2} ${nc.value}`); break;
+      case "D":
+        lines.push(`${nc.name} ${nc.n1} ${nc.n2} VF=${nc.vf}`); break;
+      case "S":
+        lines.push(`${nc.name} ${nc.n1} ${nc.n2} ${nc.state ? "CLOSED" : "OPEN"}`); break;
+    }
+  }
+  if (netlist.warnings.length > 0) {
+    lines.push("");
+    for (const w of netlist.warnings) lines.push(`* WARNING: ${w}`);
+  }
+  return lines.join("\n");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── REDUCER / STATE ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type ToolMode = "select" | "wire" | "place";
+interface HistoryEntry { components: Component[]; wires: Wire[]; }
+
+function readPersistedTheme(): boolean {
+  try {
+    const v = localStorage.getItem(THEME_STORAGE_KEY);
+    if (v === "dark")  return true;
+    if (v === "light") return false;
+  } catch { /* SSR / private browsing */ }
+  return false; // ← light mode by default
+}
+
+interface AppState {
+  components: Component[];
+  wires: Wire[];
+  selection: string[];
+  tool: ToolMode;
+  placingType: ComponentType | null;
+  wirePoints: Vec2[];
+  mouseWorld: Vec2;
+  ghostPos: Vec2 | null;
+  ghostRot: Rotation;
+  showGrid: boolean;
+  darkMode: boolean;
+  history: HistoryEntry[];
+  historyIdx: number;
+}
+
+type Action =
+  | { type: "SET_TOOL";        tool: ToolMode; placingType?: ComponentType | null }
+  | { type: "SET_MOUSE";       pos: Vec2 }
+  | { type: "SET_GHOST";       pos: Vec2; rot?: Rotation }
+  | { type: "ROTATE_GHOST" }
+  | { type: "ADD_COMPONENT";   comp: Component }
+  | { type: "ADD_WIRE";        wire: Wire }
+  | { type: "SET_WIRE_POINTS"; pts: Vec2[] }
+  | { type: "DELETE_SELECTED" }
+  | { type: "SELECT";          ids: string[] }
+  | { type: "MOVE_SELECTION";  dx: number; dy: number }
+  | { type: "ROTATE_SELECTED" }
+  | { type: "UPDATE_PROP";     id: string; key: string; value: unknown }
+  | { type: "UNDO" }
+  | { type: "REDO" }
+  | { type: "LOAD";            components: Component[]; wires: Wire[] }
+  | { type: "TOGGLE_GRID" }
+  | { type: "TOGGLE_DARK" };
+
+const initialState: AppState = {
+  components: [], wires: [], selection: [],
+  tool: "select", placingType: null, wirePoints: [],
+  mouseWorld: { x:0, y:0 }, ghostPos: null, ghostRot: 0,
+  showGrid: true,
+  darkMode: readPersistedTheme(),
+  history: [{ components: [], wires: [] }],
+  historyIdx: 0,
+};
+
+function cloneCircuit(s: AppState) {
+  return { components: JSON.parse(JSON.stringify(s.components)), wires: JSON.parse(JSON.stringify(s.wires)) };
+}
+function cloneEntry(e: HistoryEntry) {
+  return { components: JSON.parse(JSON.stringify(e.components)), wires: JSON.parse(JSON.stringify(e.wires)) };
+}
+function pushHistory(state: AppState): AppState {
+  const entry = cloneCircuit(state);
+  const history = [...state.history.slice(0, state.historyIdx+1), entry];
+  if (history.length > 80) history.shift();
+  return { ...state, history, historyIdx: history.length-1 };
+}
+
+function reducer(state: AppState, action: Action): AppState {
+  switch (action.type) {
+    case "SET_TOOL":         return { ...state, tool: action.tool, placingType: action.placingType ?? null, wirePoints: [], selection: [], ghostPos: null };
+    case "SET_MOUSE":        return { ...state, mouseWorld: action.pos };
+    case "SET_GHOST":        return { ...state, ghostPos: action.pos, ghostRot: action.rot ?? state.ghostRot };
+    case "ROTATE_GHOST":     return { ...state, ghostRot: ((state.ghostRot+90)%360) as Rotation };
+    case "ADD_COMPONENT":    return pushHistory({ ...state, components: [...state.components, action.comp] });
+    case "ADD_WIRE":         return pushHistory({ ...state, wires: [...state.wires, action.wire] });
+    case "SET_WIRE_POINTS":  return { ...state, wirePoints: action.pts };
+    case "DELETE_SELECTED": {
+      const ids = new Set(state.selection);
+      return pushHistory({ ...state, components: state.components.filter(c => !ids.has(c.id)), wires: state.wires.filter(w => !ids.has(w.id)), selection: [] });
+    }
+    case "SELECT":           return { ...state, selection: action.ids };
+    case "MOVE_SELECTION": {
+      const ids = new Set(state.selection);
+      return { ...state,
+        components: state.components.map(c => ids.has(c.id) ? { ...c, position: { x: c.position.x+action.dx, y: c.position.y+action.dy } } : c),
+        wires: state.wires.map(w => ids.has(w.id) ? { ...w, points: w.points.map(p => ({ x: p.x+action.dx, y: p.y+action.dy })) } : w),
+      };
+    }
+    case "ROTATE_SELECTED": {
+      const ids = new Set(state.selection);
+      return pushHistory({ ...state, components: state.components.map(c => ids.has(c.id) ? { ...c, rotation: ((c.rotation+90)%360) as Rotation } : c) });
+    }
+    case "UPDATE_PROP":
+      return pushHistory({ ...state, components: state.components.map(c => c.id === action.id ? { ...c, props: { ...c.props, [action.key]: action.value } } : c) });
+    case "UNDO": {
+      if (state.historyIdx <= 0) return state;
+      const idx = state.historyIdx-1;
+      return { ...state, historyIdx: idx, ...cloneEntry(state.history[idx]), selection: [] };
+    }
+    case "REDO": {
+      if (state.historyIdx >= state.history.length-1) return state;
+      const idx = state.historyIdx+1;
+      return { ...state, historyIdx: idx, ...cloneEntry(state.history[idx]), selection: [] };
+    }
+    case "LOAD":
+      return pushHistory({ ...state, components: action.components, wires: action.wires, selection: [], wirePoints: [] });
+    case "TOGGLE_GRID":  return { ...state, showGrid: !state.showGrid };
+    case "TOGGLE_DARK": {
+      const next = !state.darkMode;
+      try { localStorage.setItem(THEME_STORAGE_KEY, next ? "dark" : "light"); } catch {}
+      return { ...state, darkMode: next };
+    }
+    default: return state;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── CANVAS RENDERER ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface DragBox { sx: number; sy: number; ex: number; ey: number; }
+
+function renderCanvas(
+  ctx: CanvasRenderingContext2D,
+  state: AppState,
+  cam: Camera,
+  hoverId: string | null,
+  dragBox: DragBox | null
+): void {
+  const W = ctx.canvas.width / (window.devicePixelRatio || 1);
+  const H = ctx.canvas.height / (window.devicePixelRatio || 1);
+  const dark = state.darkMode;
+
+  // Light-mode palette (high contrast on white)
+  const bg         = dark ? "#0a0c14" : "#ffffff";
+  const gridLine   = dark ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.07)";
+  const gridAccent = dark ? "rgba(255,255,255,.1)"  : "rgba(0,0,0,.18)";
+  const wireCol    = dark ? "#94a3b8" : "#1e293b";
+  const juncCol    = dark ? "#e2e8f0" : "#1e293b";
+  const termAlpha  = dark ? "rgba(96,165,250,.5)" : "rgba(37,99,235,.45)";
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  if (state.showGrid) {
+    const tl = s2w(0,0,cam), br = s2w(W,H,cam);
+    const startX = Math.floor(tl.x/GRID)*GRID, startY = Math.floor(tl.y/GRID)*GRID;
+    ctx.lineWidth = 0.5;
+    for (let x = startX; x <= br.x+GRID; x += GRID) {
+      ctx.strokeStyle = x%(GRID*5)===0 ? gridAccent : gridLine;
+      const px = x*cam.z+cam.x;
+      ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H); ctx.stroke();
+    }
+    for (let y = startY; y <= br.y+GRID; y += GRID) {
+      ctx.strokeStyle = y%(GRID*5)===0 ? gridAccent : gridLine;
+      const py = y*cam.z+cam.y;
+      ctx.beginPath(); ctx.moveTo(0,py); ctx.lineTo(W,py); ctx.stroke();
+    }
+  }
+
+  // Wires
+  for (const wire of state.wires) {
+    const sel = state.selection.includes(wire.id);
+    const hov = hoverId === wire.id;
+    ctx.strokeStyle = sel ? colSel : hov ? colHov : wireCol;
+    ctx.lineWidth = sel || hov ? 2.5 : 1.8;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.beginPath();
+    const pts = wire.points.map(p => w2s(p.x,p.y,cam));
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i=1; i<pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
+
+  // Components
+  for (const comp of state.components) {
+    const def = COMPONENT_DEFS[comp.type];
+    if (!def) continue;
+    const sel = state.selection.includes(comp.id);
+    const hov = hoverId === comp.id;
+    const sp  = w2s(comp.position.x, comp.position.y, cam);
+
+    if (sel) {
+      const ts   = termWorlds(comp);
+      const allX = [comp.position.x, ...ts.map(t=>t.x)];
+      const allY = [comp.position.y, ...ts.map(t=>t.y)];
+      const pad  = GRID;
+      const tl   = w2s(Math.min(...allX)-pad, Math.min(...allY)-pad, cam);
+      const br   = w2s(Math.max(...allX)+pad, Math.max(...allY)+pad, cam);
+      ctx.strokeStyle = "rgba(37,99,235,.35)"; ctx.lineWidth = 1; ctx.setLineDash([4,3]);
+      ctx.strokeRect(tl.x, tl.y, br.x-tl.x, br.y-tl.y); ctx.setLineDash([]);
+    }
+
     ctx.save();
-    ctx.translate(off.x, off.y);
-    ctx.scale(scale, scale);
+    ctx.translate(sp.x, sp.y);
+    ctx.rotate((comp.rotation*Math.PI)/180);
+    ctx.scale(cam.z, cam.z);
+    def.draw(ctx, comp, sel, hov);
+    ctx.restore();
 
-    // ── Grid ──────────────────────────────────────────────────────────────
-    {
-      const wx0 = -off.x / scale, wy0 = -off.y / scale;
-      const wx1 = (W - off.x) / scale, wy1 = (H - off.y) / scale;
-
-      ctx.beginPath();
-      ctx.strokeStyle = "rgba(148,163,184,0.28)";
-      ctx.lineWidth   = 0.5 / scale;
-      for (let x = Math.floor(wx0 / MINOR_GRID) * MINOR_GRID; x <= wx1; x += MINOR_GRID) {
-        if (x % MAJOR_GRID === 0) continue;
-        ctx.moveTo(x, wy0); ctx.lineTo(x, wy1);
-      }
-      for (let y = Math.floor(wy0 / MINOR_GRID) * MINOR_GRID; y <= wy1; y += MINOR_GRID) {
-        if (y % MAJOR_GRID === 0) continue;
-        ctx.moveTo(wx0, y); ctx.lineTo(wx1, y);
-      }
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.strokeStyle = "rgba(100,116,139,0.38)";
-      ctx.lineWidth   = 0.8 / scale;
-      for (let x = Math.floor(wx0 / MAJOR_GRID) * MAJOR_GRID; x <= wx1; x += MAJOR_GRID) {
-        ctx.moveTo(x, wy0); ctx.lineTo(x, wy1);
-      }
-      for (let y = Math.floor(wy0 / MAJOR_GRID) * MAJOR_GRID; y <= wy1; y += MAJOR_GRID) {
-        ctx.moveTo(wx0, y); ctx.lineTo(wx1, y);
-      }
-      ctx.stroke();
-    }
-
-    // ── Wires ────────────────────────────────────────────────────────────
-    const pointMap = new Map(points.map(p => [p.id, p]));
-
-    for (const wire of wires) {
-      const start = pointMap.get(wire.startPointId);
-      if (!start) continue;
-
-      if (wire.endPointId === null) {
-        if (wire.id !== activeWireIdRef.current) continue;
-        ctx.beginPath();
-        ctx.strokeStyle = "rgba(59,130,246,0.75)";
-        ctx.lineWidth   = 1.5 / scale;
-        ctx.setLineDash([5 / scale, 4 / scale]);
-        ctx.moveTo(start.x, start.y);
-        ctx.lineTo(mousePosRef.current.x, mousePosRef.current.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      } else {
-        const end = pointMap.get(wire.endPointId);
-        if (!end) continue;
-        ctx.beginPath();
-        ctx.strokeStyle = "#334155";
-        ctx.lineWidth   = 1.5 / scale;
-        ctx.setLineDash([]);
-        ctx.moveTo(start.x, start.y);
-        ctx.lineTo(end.x, end.y);
-        ctx.stroke();
-      }
-    }
-
-    // ── Junction dots ─────────────────────────────────────────────────────
-    const useCount = new Map<string, number>();
-    for (const w of wires) {
-      if (w.endPointId === null) continue;
-      useCount.set(w.startPointId, (useCount.get(w.startPointId) ?? 0) + 1);
-      useCount.set(w.endPointId,   (useCount.get(w.endPointId)   ?? 0) + 1);
-    }
-    for (const [id, count] of useCount) {
-      if (count < 3) continue;
-      const pt = pointMap.get(id);
-      if (!pt) continue;
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, 3.5 / scale, 0, Math.PI * 2);
-      ctx.fillStyle = "#1e40af";
+    for (const t of termWorlds(comp)) {
+      const ts = w2s(t.x, t.y, cam);
+      ctx.beginPath(); ctx.arc(ts.x, ts.y, 3.5, 0, Math.PI*2);
+      ctx.fillStyle = sel ? "rgba(37,99,235,.8)" : hov ? "rgba(124,58,237,.6)" : termAlpha;
       ctx.fill();
     }
+  }
 
-    // ── Components ───────────────────────────────────────────────────────
-    for (const cmp of components) {
-      const pinA = cmp.pinAId ? pointMap.get(cmp.pinAId) : null;
-      const pinB = cmp.pinBId ? pointMap.get(cmp.pinBId) : null;
+  // Junctions
+  for (const j of findJunctions(state.components, state.wires)) {
+    const js = w2s(j.x, j.y, cam);
+    ctx.beginPath(); ctx.arc(js.x, js.y, 4.5*cam.z, 0, Math.PI*2);
+    ctx.fillStyle = juncCol; ctx.fill();
+  }
 
-      // Draw in local space: translate to world pos, rotate to wire angle
-      ctx.save();
-      ctx.translate(cmp.x, cmp.y);
-      ctx.rotate(cmp.angle);
-
-      if (cmp.type === "interrupteur") {
-        drawInterrupteurSymbol(ctx, scale, cmp.isOn);
-      } else {
-        drawFallbackSymbol(ctx, cmp.type, COMP_HALF, scale);
-      }
-
-      ctx.restore();
-
-      // Click-target hint: subtle circle in cursor mode
-      if (tool === "cursor" && cmp.type === "interrupteur") {
-        ctx.beginPath();
-        ctx.arc(cmp.x, cmp.y, COMP_HALF * 0.55, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(148,163,184,0.2)";
-        ctx.lineWidth   = 0.5 / scale;
-        ctx.stroke();
-      }
-
-      // Pin dots
-      for (const pin of [pinA, pinB]) {
-        if (!pin) continue;
-        ctx.beginPath();
-        ctx.arc(pin.x, pin.y, 2.5 / scale, 0, Math.PI * 2);
-        ctx.fillStyle   = "#ffffff";
-        ctx.strokeStyle = cmp.isOn ? "#1d4ed8" : "#1e40af";
-        ctx.lineWidth   = 1 / scale;
-        ctx.fill();
-        ctx.stroke();
+  // Wire preview
+  if (state.tool === "wire" && state.wirePoints.length > 0) {
+    const endPt = snapToNearby(state.components, state.wires, state.mouseWorld);
+    const chain = [...state.wirePoints, endPt];
+    ctx.strokeStyle = "rgba(37,99,235,.75)"; ctx.lineWidth = 2; ctx.setLineDash([6,4]); ctx.lineCap = "round";
+    ctx.beginPath();
+    let first = true;
+    for (let i=0; i<chain.length-1; i++) {
+      const seg = orthoRoute(chain[i], chain[i+1]);
+      for (let j=0; j<seg.length; j++) {
+        const sp = w2s(seg[j].x, seg[j].y, cam);
+        if (j===0 && first) { ctx.moveTo(sp.x,sp.y); first=false; } else ctx.lineTo(sp.x,sp.y);
       }
     }
+    ctx.stroke(); ctx.setLineDash([]);
+    const fs = w2s(state.wirePoints[0].x, state.wirePoints[0].y, cam);
+    ctx.beginPath(); ctx.arc(fs.x,fs.y,5,0,Math.PI*2); ctx.fillStyle=colSel; ctx.fill();
+    const ep = w2s(endPt.x,endPt.y,cam);
+    ctx.beginPath(); ctx.arc(ep.x,ep.y,4,0,Math.PI*2); ctx.fillStyle="rgba(37,99,235,.55)"; ctx.fill();
+  }
 
-    ctx.restore();
-  }, [points, wires, components, tool, renderTick]);
+  // Ghost placement preview
+  if (state.tool === "place" && state.ghostPos && state.placingType) {
+    const def = COMPONENT_DEFS[state.placingType];
+    const sp  = w2s(state.ghostPos.x, state.ghostPos.y, cam);
+    ctx.save();
+    ctx.translate(sp.x,sp.y); ctx.rotate((state.ghostRot*Math.PI)/180); ctx.scale(cam.z,cam.z);
+    ctx.globalAlpha = 0.45;
+    def.draw(ctx, { id:"__ghost__", type:state.placingType, position:{x:0,y:0}, rotation:0, props:def.defaultProps }, false, false);
+    ctx.globalAlpha = 1; ctx.restore();
+    ctx.strokeStyle = "rgba(37,99,235,.18)"; ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(sp.x,0); ctx.lineTo(sp.x,H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,sp.y); ctx.lineTo(W,sp.y); ctx.stroke();
+  }
 
-  // ─── Resize ────────────────────────────────────────────────────────────────
+  // Drag-select box
+  if (dragBox) {
+    const x=Math.min(dragBox.sx,dragBox.ex), y=Math.min(dragBox.sy,dragBox.ey);
+    const w=Math.abs(dragBox.ex-dragBox.sx), h=Math.abs(dragBox.ey-dragBox.sy);
+    ctx.fillStyle   = "rgba(37,99,235,.07)"; ctx.fillRect(x,y,w,h);
+    ctx.strokeStyle = "rgba(37,99,235,.5)";  ctx.lineWidth=1; ctx.setLineDash([4,3]);
+    ctx.strokeRect(x,y,w,h); ctx.setLineDash([]);
+  }
+}
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ro = new ResizeObserver(() => {
-      canvas.width  = canvas.clientWidth;
-      canvas.height = canvas.clientHeight;
-      redraw();
-    });
-    ro.observe(canvas);
-    return () => ro.disconnect();
-  }, [redraw]);
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── COMPONENT PROPERTY RENDERER  (schema-driven, no per-type switch) ─────────
+// ═══════════════════════════════════════════════════════════════════════════════
 
-  // ─── Wheel zoom ────────────────────────────────────────────────────────────
+interface ComponentPropertyRendererProps {
+  comp: Component;
+  dark: boolean;
+  dispatch: React.Dispatch<Action>;
+}
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect     = canvas.getBoundingClientRect();
-      const mx       = e.clientX - rect.left, my = e.clientY - rect.top;
-      const factor   = e.deltaY > 0 ? 0.9 : 1.1;
-      const newScale = Math.min(Math.max(scaleRef.current * factor, 0.1), 12);
-      offsetRef.current = {
-        x: mx - (mx - offsetRef.current.x) * (newScale / scaleRef.current),
-        y: my - (my - offsetRef.current.y) * (newScale / scaleRef.current),
-      };
-      scaleRef.current = newScale;
-      redraw();
-    };
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", onWheel);
-  }, [redraw]);
+function ComponentPropertyRenderer({ comp, dark, dispatch }: ComponentPropertyRendererProps) {
+  const schema  = PROP_SCHEMAS[comp.type];
+  const entries = Object.entries(schema);
 
-  // ─── Mouse events ─────────────────────────────────────────────────────────
+  const textMuted = dark ? "#64748b" : "#6b7280";
+  const inputBase: React.CSSProperties = {
+    width: "100%", padding: "5px 8px", fontSize: 12,
+    fontFamily: "'JetBrains Mono',monospace", borderRadius: 5,
+    border: dark ? "1px solid #1e293b" : "1px solid #d1d5db",
+    background: dark ? "#0f172a" : "#f9fafb",
+    color: dark ? "#e2e8f0" : "#111827",
+    outline: "none", boxSizing: "border-box",
+  };
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const canvas = canvasRef.current!;
-      const rect   = canvas.getBoundingClientRect();
-      const sx     = e.clientX - rect.left, sy = e.clientY - rect.top;
-
-      // Pan
-      if (e.button === 1 || (tool === "hand" && e.button === 0)) {
-        e.preventDefault();
-        isPanningRef.current      = true;
-        panStartRef.current       = { x: sx, y: sy };
-        panStartOffsetRef.current = { ...offsetRef.current };
-        return;
-      }
-
-      // Cursor tool: toggle switch components
-      if (tool === "cursor" && e.button === 0) {
-        tryToggleComponent(sx, sy);
-        return;
-      }
-
-      if (tool !== "wires") return;
-
-      // Cancel wire
-      if (e.button === 2) {
-        const aid = activeWireIdRef.current;
-        if (!aid) return;
-        setWires(prev => {
-          const wire = prev.find(w => w.id === aid);
-          if (!wire) return prev;
-          const rest = prev.filter(w => w.id !== aid);
-          const used = rest.some(w => w.startPointId === wire.startPointId || w.endPointId === wire.startPointId);
-          if (!used) setPoints(pp => pp.filter(p => p.id !== wire.startPointId));
-          return rest;
-        });
-        activeWireIdRef.current = null;
-        redraw();
-        return;
-      }
-
-      if (e.button !== 0) return;
-
-      const raw     = screenToWorld(sx, sy);
-      const snapped = { x: snapToGrid(raw.x, MINOR_GRID), y: snapToGrid(raw.y, MINOR_GRID) };
-      const activeId = activeWireIdRef.current;
-
-      if (activeId !== null) {
-        // End wire
-        setPoints(prev => {
-          const existing = findNearPoint(snapped.x, snapped.y, prev);
-          let endPtId: string;
-          let next = prev;
-          if (existing) {
-            endPtId = existing.id;
-          } else {
-            const np: Point = { id: uid("pt"), ...snapped };
-            next    = [...prev, np];
-            endPtId = np.id;
-          }
-          setWires(ww => {
-            const updated = ww.map(w => w.id === activeId ? { ...w, endPointId: endPtId } : w);
-            const nw: Wire = { id: uid("wire"), startPointId: endPtId, endPointId: null };
-            activeWireIdRef.current = nw.id;
-            return [...updated, nw];
-          });
-          return next;
-        });
-      } else {
-        // Start wire
-        setPoints(prev => {
-          const existing = findNearPoint(snapped.x, snapped.y, prev);
-          let startPtId: string;
-          let next = prev;
-          if (existing) {
-            startPtId = existing.id;
-          } else {
-            const np: Point = { id: uid("pt"), ...snapped };
-            next      = [...prev, np];
-            startPtId = np.id;
-          }
-          const nw: Wire = { id: uid("wire"), startPointId: startPtId, endPointId: null };
-          activeWireIdRef.current = nw.id;
-          setWires(ww => [...ww, nw]);
-          return next;
-        });
-      }
-    },
-    [tool, redraw]
-  );
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const canvas = canvasRef.current!;
-      const rect   = canvas.getBoundingClientRect();
-      const sx     = e.clientX - rect.left, sy = e.clientY - rect.top;
-
-      if (isPanningRef.current) {
-        offsetRef.current = {
-          x: panStartOffsetRef.current.x + (sx - panStartRef.current.x),
-          y: panStartOffsetRef.current.y + (sy - panStartRef.current.y),
-        };
-        redraw();
-        return;
-      }
-
-      if (tool === "wires" && activeWireIdRef.current !== null) {
-        const raw = screenToWorld(sx, sy);
-        mousePosRef.current = {
-          x: snapToGrid(raw.x, MINOR_GRID),
-          y: snapToGrid(raw.y, MINOR_GRID),
-        };
-        redraw();
-      }
-    },
-    [tool, redraw]
-  );
-
-  const handleMouseUp = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (e.button === 1 || tool === "hand") isPanningRef.current = false;
-    },
-    [tool]
-  );
-
-  const handleContextMenu = useCallback((e: React.MouseEvent) => e.preventDefault(), []);
-
-  const cursorStyle =
-    tool === "hand"
-      ? isPanningRef.current ? "cursor-grabbing" : "cursor-grab"
-      : tool === "wires"
-      ? "cursor-crosshair"
-      : "cursor-pointer";
-
-  const COMP_LIST = [
-    { type: "interrupteur", icon: "⏯️", label: "Interrupteur" },
-    { type: "resistance",   icon: "Ω",  label: "Résistance"   },
-    { type: "batterie",     icon: "🔋", label: "Batterie"      },
-    { type: "led",          icon: "💡", label: "LED"           },
-  ];
-
-  // ─── Render ───────────────────────────────────────────────────────────────
+  if (entries.length === 0) {
+    return <p style={{ fontSize:11, color:textMuted, fontFamily:"monospace" }}>No configurable properties.</p>;
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 relative overflow-hidden">
-      <canvas
-        ref={canvasRef}
-        className={`absolute inset-0 w-full h-full ${cursorStyle}`}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onContextMenu={handleContextMenu}
-        onDragOver={(e) => { if (tool === "cursor") e.preventDefault(); }}
-        onDrop={(e: React.DragEvent<HTMLCanvasElement>) => {
-          if (tool !== "cursor") return;
-          e.preventDefault();
-          const type  = e.dataTransfer.getData("application/x-component");
-          const rect  = (e.target as HTMLCanvasElement).getBoundingClientRect();
-          const world = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
-          if (!onDropComponent(type, world.x, world.y)) {
-            console.warn("[drop] no wire within range — drop closer to a wire segment");
-          }
+    <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      {entries.map(([key, field]) => {
+        const value = comp.props[key];
+        return (
+          <div key={key} style={{ display:"flex", flexDirection:"column", gap:3 }}>
+            <label style={{ fontSize:10, fontFamily:"monospace", letterSpacing:"0.05em", color:textMuted }}>
+              {field.label}
+            </label>
+
+            {field.type === "boolean" ? (
+              /* Custom toggle — no checkbox, cleaner look */
+              <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+                <div
+                  role="checkbox"
+                  aria-checked={value as boolean}
+                  tabIndex={0}
+                  onClick={() => dispatch({ type:"UPDATE_PROP", id:comp.id, key, value:!(value as boolean) })}
+                  onKeyDown={e => { if (e.key===" "||e.key==="Enter") dispatch({ type:"UPDATE_PROP", id:comp.id, key, value:!(value as boolean) }); }}
+                  style={{
+                    width:36, height:20, borderRadius:10, position:"relative", cursor:"pointer", flexShrink:0,
+                    background: value ? "#2563eb" : (dark ? "#334155" : "#d1d5db"),
+                    transition:"background .15s",
+                  }}
+                >
+                  <div style={{
+                    position:"absolute", top:3, left: value ? 18 : 3,
+                    width:14, height:14, borderRadius:"50%", background:"#fff",
+                    transition:"left .15s",
+                  }} />
+                </div>
+                <span style={{ fontSize:12, fontFamily:"monospace", color:dark?"#94a3b8":"#374151" }}>
+                  {value ? "Closed" : "Open"}
+                </span>
+              </label>
+
+            ) : field.type === "select" ? (
+              <select
+                value={value as string}
+                onChange={e => dispatch({ type:"UPDATE_PROP", id:comp.id, key, value:e.target.value })}
+                style={inputBase}
+              >
+                {(field as SelectField).options.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+
+            ) : (
+              <input
+                type="number"
+                value={value as number}
+                min={(field as NumberField).min}
+                step={(field as NumberField).step}
+                style={inputBase}
+                onChange={e => dispatch({ type:"UPDATE_PROP", id:comp.id, key, value:parseFloat(e.target.value)||0 })}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── COMPONENT PROPERTY POPOVER ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface ComponentPopoverProps {
+  comp: Component | null;
+  /** Position relative to the canvas wrapper element */
+  anchorScreen: Vec2 | null;
+  /** Bounding rect of the canvas wrapper (for viewport clamping) */
+  canvasRect: DOMRect | null;
+  dark: boolean;
+  dispatch: React.Dispatch<Action>;
+}
+
+function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: ComponentPopoverProps) {
+  const open = comp !== null && anchorScreen !== null;
+  const def  = comp ? COMPONENT_DEFS[comp.type] : null;
+
+  // Convert canvas-relative position → viewport-absolute
+  const absAnchor = anchorScreen && canvasRect
+    ? {
+        x: Math.max(8, Math.min(window.innerWidth  - 8, canvasRect.left + anchorScreen.x)),
+        y: Math.max(8, Math.min(window.innerHeight - 8, canvasRect.top  + anchorScreen.y)),
+      }
+    : null;
+
+  const popBg   = dark ? "#0f172a" : "#ffffff";
+  const border  = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const shadow  = dark ? "0 8px 32px rgba(0,0,0,.6)" : "0 4px 24px rgba(0,0,0,.12)";
+  const textPri = dark ? "#e2e8f0" : "#111827";
+  const textMut = dark ? "#64748b" : "#6b7280";
+  const actBase: React.CSSProperties = {
+    width:"100%", background:"transparent", border, color:textMut,
+    borderRadius:5, padding:"5px 8px", fontSize:11,
+    fontFamily:"'JetBrains Mono',monospace", cursor:"pointer", textAlign:"left", marginBottom:4,
+  };
+
+  return (
+    <PopoverPrimitive.Root open={open}>
+      {/*
+        Invisible 0×0 anchor fixed at the component's screen position.
+        Radix positions PopoverContent relative to this element.
+      */}
+      <PopoverPrimitive.Anchor
+        style={{
+          position: "fixed",
+          left: absAnchor?.x ?? 0,
+          top:  absAnchor?.y ?? 0,
+          width: 0, height: 0,
+          pointerEvents: "none",
         }}
-        aria-hidden="true"
       />
 
-      {/* ── Side panel ─────────────────────────────────────────────────── */}
-      <aside className="fixed left-6 top-16 bottom-16 w-64 bg-white/85 backdrop-blur-md border border-slate-200 rounded-xl shadow-xl p-4 flex flex-col gap-4 z-40">
-        <div>
-          <h3 className="text-lg font-semibold tracking-tight">Composants</h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Outil <strong>curseur</strong> → glisser sur un fil
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          {COMP_LIST.map(({ type, icon, label }) => (
-            <Button
-              key={type}
-              variant="ghost"
-              draggable={tool === "cursor"}
-              onDragStart={(e) => {
-                if (tool !== "cursor") return;
-                e.dataTransfer.setData("application/x-component", type);
-                e.dataTransfer.effectAllowed = "copy";
-              }}
-              className="justify-start gap-3 hover:bg-slate-100 hover:scale-[1.02] transition-all"
-            >
-              <span className="text-base w-5 text-center">{icon}</span>
-              <span className="text-sm">{label}</span>
-            </Button>
-          ))}
-        </div>
-
-        {/* Live component state table */}
-        {components.filter(c => c.type === "interrupteur").length > 0 && (
-          <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-xs space-y-1">
-            <div className="font-medium text-slate-600 mb-1">État des interrupteurs</div>
-            {components.filter(c => c.type === "interrupteur").map((c, i) => (
-              <div key={c.id} className="flex items-center justify-between">
-                <span className="text-slate-500">SW{i + 1}</span>
-                <span className={`font-mono font-semibold ${c.isOn ? "text-blue-600" : "text-slate-400"}`}>
-                  {c.isOn ? "FERMÉ" : "OUVERT"}
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          side="right"
+          sideOffset={20}
+          align="center"
+          avoidCollisions
+          collisionPadding={12}
+          onOpenAutoFocus={e => e.preventDefault()}
+          onInteractOutside={() => dispatch({ type:"SELECT", ids:[] })}
+          onEscapeKeyDown={()   => dispatch({ type:"SELECT", ids:[] })}
+          style={{
+            width: 224, background: popBg, border, borderRadius: 10,
+            boxShadow: shadow, padding: 14,
+            display: "flex", flexDirection: "column", gap: 10,
+            zIndex: 1000, fontFamily: "'JetBrains Mono',monospace",
+          }}
+        >
+          {comp && def && (
+            <>
+              {/* ── Header ── */}
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
+                <span style={{
+                  display:"inline-flex", alignItems:"center", justifyContent:"center",
+                  width:26, height:26, borderRadius:6,
+                  background:`${def.color}20`, color:def.color,
+                  fontSize:10, fontWeight:700,
+                }}>
+                  {def.symbol}
                 </span>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:textPri }}>{def.label}</div>
+                  <div style={{ fontSize:9, color:textMut }}>{comp.id}</div>
+                </div>
+                <PopoverPrimitive.Close
+                  onClick={() => dispatch({ type:"SELECT", ids:[] })}
+                  aria-label="Close"
+                  style={{ background:"transparent", border:"none", color:textMut, cursor:"pointer", fontSize:16, lineHeight:1, padding:"2px 4px", borderRadius:3 }}
+                >
+                  ×
+                </PopoverPrimitive.Close>
               </div>
+
+              <div style={{ fontSize:9.5, color:textMut, lineHeight:1.8 }}>
+                pos ({Math.round(comp.position.x)}, {Math.round(comp.position.y)}) · rot {comp.rotation}°
+              </div>
+
+              {/* ── Schema-driven fields ── */}
+              <ComponentPropertyRenderer comp={comp} dark={dark} dispatch={dispatch} />
+
+              {/* ── Actions ── */}
+              <div style={{ borderTop: dark?"1px solid #1e293b":"1px solid #e5e7eb", paddingTop:8, marginTop:2 }}>
+                <button style={actBase} onClick={() => dispatch({ type:"ROTATE_SELECTED" })}>↻ Rotate 90°</button>
+                <button style={{ ...actBase, color:"#dc2626", marginBottom:0 }} onClick={() => dispatch({ type:"DELETE_SELECTED" })}>✕ Delete</button>
+              </div>
+            </>
+          )}
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── NETLIST MODAL ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface NetlistModalProps { circuit: Circuit; dark: boolean; onClose: () => void; }
+
+function NetlistModal({ circuit, dark, onClose }: NetlistModalProps) {
+  const netlist = generateNetlist(circuit);
+  const text    = netlistToString(netlist);
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); });
+
+  const bg     = dark ? "#0f172a" : "#ffffff";
+  const border = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const textPri= dark ? "#e2e8f0" : "#111827";
+  const textMut= dark ? "#64748b" : "#6b7280";
+  const codeBg = dark ? "#080a12" : "#f9fafb";
+
+  return (
+    <div
+      style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(0,0,0,.45)", display:"flex", alignItems:"center", justifyContent:"center" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width:560, maxHeight:"80vh", background:bg, borderRadius:12, border,
+          boxShadow:"0 16px 48px rgba(0,0,0,.25)", display:"flex", flexDirection:"column",
+          overflow:"hidden", fontFamily:"'JetBrains Mono',monospace",
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding:"13px 16px", borderBottom:border, display:"flex", alignItems:"center", gap:10 }}>
+          <span style={{ fontSize:13, fontWeight:600, color:textPri }}>Netlist  (SPICE / MNA)</span>
+          <div style={{ flex:1 }} />
+          {netlist.warnings.length > 0 && (
+            <span style={{ fontSize:10, color:"#b45309", background:"#fef3c7", borderRadius:4, padding:"2px 8px" }}>
+              {netlist.warnings.length} warning{netlist.warnings.length>1?"s":""}
+            </span>
+          )}
+          <button onClick={copy}    style={{ fontSize:11, color:copied?"#15803d":"#2563eb", background:"transparent", border:"none", cursor:"pointer" }}>{copied ? "✓ Copied" : "Copy"}</button>
+          <button onClick={onClose} style={{ fontSize:16, color:textMut, background:"transparent", border:"none", cursor:"pointer", lineHeight:1 }}>×</button>
+        </div>
+
+        {/* Node summary */}
+        <div style={{ padding:"8px 16px", borderBottom:border, display:"flex", gap:14, flexWrap:"wrap" }}>
+          <span style={{ fontSize:10, color:textMut }}>Nodes: <strong style={{ color:textPri }}>{netlist.nodes.join(", ")||"—"}</strong></span>
+          <span style={{ fontSize:10, color:textMut }}>Elements: <strong style={{ color:textPri }}>{netlist.components.length}</strong></span>
+        </div>
+
+        {/* Netlist text */}
+        <pre style={{ flex:1, overflowY:"auto", margin:0, padding:"12px 16px", fontSize:12, lineHeight:1.9, color:textPri, background:codeBg, whiteSpace:"pre-wrap", wordBreak:"break-all" }}>
+          {text || "* Empty circuit"}
+        </pre>
+
+        {/* Warnings */}
+        {netlist.warnings.length > 0 && (
+          <div style={{ padding:"10px 16px", borderTop:border, display:"flex", flexDirection:"column", gap:4 }}>
+            {netlist.warnings.map((w,i) => (
+              <div key={i} style={{ fontSize:10, color:"#b45309", fontFamily:"monospace" }}>⚠ {w}</div>
             ))}
-            <div className="text-slate-400 mt-1">Cliquer pour basculer</div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
 
-        {/* Keyboard shortcuts */}
-        <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-xs text-slate-500 space-y-1">
-          <div className="font-medium text-slate-600 mb-1">Raccourcis</div>
-          <div><kbd className="bg-white border border-slate-200 rounded px-1">Scroll</kbd> Zoom</div>
-          <div><kbd className="bg-white border border-slate-200 rounded px-1">Clic droit</kbd> Annuler fil</div>
-          <div><kbd className="bg-white border border-slate-200 rounded px-1">Clic milieu</kbd> Glisser vue</div>
-          <div><kbd className="bg-white border border-slate-200 rounded px-1">Clic</kbd> Basculer switch</div>
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── CIRCUIT CANVAS COMPONENT ────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface MoveDrag { type:"move"; startWorld:Vec2; lastDx:number; lastDy:number; }
+interface BoxDrag  { type:"box";  startScreen:Vec2; }
+type DragState = MoveDrag | BoxDrag;
+
+interface CircuitCanvasProps {
+  state: AppState;
+  dispatch: React.Dispatch<Action>;
+  cam: Camera;
+  setCam: React.Dispatch<React.SetStateAction<Camera>>;
+  /** Called when user clicks a component in select mode. */
+  onComponentClick: (compId: string, canvasRelativeScreen: Vec2) => void;
+}
+
+function CircuitCanvas({ state, dispatch, cam, setCam, onComponentClick }: CircuitCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hoverId, setHoverId] = useState<string|null>(null);
+  const [dragBox, setDragBox] = useState<DragBox|null>(null);
+
+  const dragRef  = useRef<DragState|null>(null);
+  const panRef   = useRef<{ lx:number; ly:number }|null>(null);
+  const stateRef = useRef(state);
+  const camRef   = useRef(cam);
+  stateRef.current = state;
+  camRef.current   = cam;
+
+  // Resize
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const resize = () => {
+      const dpr = window.devicePixelRatio||1;
+      canvas.width  = canvas.offsetWidth  * dpr;
+      canvas.height = canvas.offsetHeight * dpr;
+      canvas.getContext("2d")!.scale(dpr,dpr);
+    };
+    const ro = new ResizeObserver(resize); ro.observe(canvas); resize();
+    return () => ro.disconnect();
+  }, []);
+
+  // Render
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    renderCanvas(ctx, state, cam, hoverId, dragBox);
+  });
+
+  const getWorld  = useCallback((e:React.MouseEvent): Vec2 => {
+    const r = canvasRef.current!.getBoundingClientRect();
+    return s2w(e.clientX-r.left, e.clientY-r.top, camRef.current);
+  }, []);
+  const getScreen = useCallback((e:React.MouseEvent): Vec2 => {
+    const r = canvasRef.current!.getBoundingClientRect();
+    return { x: e.clientX-r.left, y: e.clientY-r.top };
+  }, []);
+
+  // Wheel (non-passive)
+  const onWheel = useCallback((e:WheelEvent) => {
+    e.preventDefault();
+    const r = canvasRef.current!.getBoundingClientRect();
+    const sx = e.clientX-r.left, sy = e.clientY-r.top;
+    const f  = e.deltaY < 0 ? 1.12 : 1/1.12;
+    setCam(c => { const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, c.z*f)); return { x:sx-(sx-c.x)*(z/c.z), y:sy-(sy-c.y)*(z/c.z), z }; });
+  }, [setCam]);
+  useEffect(() => {
+    const el = canvasRef.current; if (!el) return;
+    el.addEventListener("wheel", onWheel, { passive:false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [onWheel]);
+
+  const onMouseMove = useCallback((e:React.MouseEvent) => {
+    const world  = getWorld(e);
+    const screen = getScreen(e);
+    dispatch({ type:"SET_MOUSE", pos:world });
+
+    if (panRef.current) {
+      setCam(c => ({ ...c, x:c.x+e.clientX-panRef.current!.lx, y:c.y+e.clientY-panRef.current!.ly }));
+      panRef.current = { lx:e.clientX, ly:e.clientY }; return;
+    }
+    const st = stateRef.current;
+    if (st.tool === "place") dispatch({ type:"SET_GHOST", pos:snapToNearby(st.components,st.wires,world) });
+
+    if (dragRef.current?.type === "move") {
+      const dr = dragRef.current as MoveDrag;
+      const dx = world.x-dr.startWorld.x, dy = world.y-dr.startWorld.y;
+      const sdx = snap(dx)-dr.lastDx, sdy = snap(dy)-dr.lastDy;
+      if (sdx!==0||sdy!==0) { dispatch({ type:"MOVE_SELECTION", dx:sdx, dy:sdy }); dr.lastDx+=sdx; dr.lastDy+=sdy; }
+      return;
+    }
+    if (dragRef.current?.type === "box") {
+      const dr = dragRef.current as BoxDrag;
+      setDragBox({ sx:dr.startScreen.x, sy:dr.startScreen.y, ex:screen.x, ey:screen.y });
+      const c2 = camRef.current;
+      const tl = s2w(Math.min(dr.startScreen.x,screen.x), Math.min(dr.startScreen.y,screen.y), c2);
+      const br = s2w(Math.max(dr.startScreen.x,screen.x), Math.max(dr.startScreen.y,screen.y), c2);
+      const ids = st.components.filter(c => c.position.x>=tl.x&&c.position.x<=br.x&&c.position.y>=tl.y&&c.position.y<=br.y).map(c=>c.id);
+      dispatch({ type:"SELECT", ids }); return;
+    }
+    setHoverId(hitTest(st.components, st.wires, world));
+  }, [dispatch, getWorld, getScreen, setCam]);
+
+  const onMouseDown = useCallback((e:React.MouseEvent) => {
+    e.preventDefault();
+    if (e.button===1||(e.button===0&&e.altKey)) { panRef.current={lx:e.clientX,ly:e.clientY}; return; }
+    if (e.button!==0) return;
+
+    const world  = getWorld(e);
+    const screen = getScreen(e);
+    const st     = stateRef.current;
+
+    if (st.tool==="place"&&st.ghostPos&&st.placingType) {
+      const def = COMPONENT_DEFS[st.placingType];
+      dispatch({ type:"ADD_COMPONENT", comp:{ id:uid(), type:st.placingType, position:{...st.ghostPos}, rotation:st.ghostRot, props:JSON.parse(JSON.stringify(def.defaultProps)) } });
+      return;
+    }
+
+    if (st.tool==="wire") {
+      const pt = snapToNearby(st.components,st.wires,world);
+      if (e.detail===2) {
+        if (st.wirePoints.length>=1) {
+          const chain = [...st.wirePoints, pt];
+          const wirePts: Vec2[] = [];
+          for (let i=0; i<chain.length-1; i++) wirePts.push(...orthoRoute(chain[i],chain[i+1]).slice(0,-1));
+          wirePts.push(chain[chain.length-1]);
+          if (wirePts.length>=2) dispatch({ type:"ADD_WIRE", wire:{ id:uid(), points:wirePts } });
+        }
+        dispatch({ type:"SET_WIRE_POINTS", pts:[] }); return;
+      }
+      dispatch({ type:"SET_WIRE_POINTS", pts:[...st.wirePoints, pt] }); return;
+    }
+
+    if (st.tool==="select") {
+      const hit = hitTest(st.components, st.wires, world);
+      if (hit) {
+        const isComp = st.components.some(c=>c.id===hit);
+        if (!e.shiftKey&&!st.selection.includes(hit)) dispatch({ type:"SELECT", ids:[hit] });
+        else if (e.shiftKey) dispatch({ type:"SELECT", ids: st.selection.includes(hit)?st.selection.filter(x=>x!==hit):[...st.selection,hit] });
+        if (isComp && !e.shiftKey) onComponentClick(hit, screen);
+        dragRef.current = { type:"move", startWorld:world, lastDx:0, lastDy:0 };
+      } else {
+        if (!e.shiftKey) dispatch({ type:"SELECT", ids:[] });
+        dragRef.current = { type:"box", startScreen:screen };
+      }
+    }
+  }, [dispatch, getWorld, getScreen, onComponentClick]);
+
+  const onMouseUp = useCallback(() => { panRef.current=null; dragRef.current=null; setDragBox(null); }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e:KeyboardEvent) => {
+      const tag = (document.activeElement as HTMLElement|null)?.tagName;
+      if (tag==="INPUT"||tag==="SELECT"||tag==="TEXTAREA") return;
+      const st = stateRef.current;
+      if (e.key==="Escape") {
+        if (st.tool==="wire") dispatch({ type:"SET_WIRE_POINTS", pts:[] });
+        else if (st.tool==="place") dispatch({ type:"SET_TOOL", tool:"select" });
+        else dispatch({ type:"SELECT", ids:[] });
+        return;
+      }
+      if (e.key==="r"||e.key==="R") {
+        if (st.tool==="place") dispatch({ type:"ROTATE_GHOST" });
+        else if (st.selection.length>0) dispatch({ type:"ROTATE_SELECTED" });
+        return;
+      }
+      if (e.key==="Delete"||e.key==="Backspace") { if (st.selection.length>0) dispatch({ type:"DELETE_SELECTED" }); return; }
+      if ((e.ctrlKey||e.metaKey)&&e.key==="z") { e.preventDefault(); dispatch({ type:"UNDO" }); return; }
+      if ((e.ctrlKey||e.metaKey)&&(e.key==="y"||e.key==="Y")) { e.preventDefault(); dispatch({ type:"REDO" }); return; }
+      if (e.key==="w"||e.key==="W") dispatch({ type:"SET_TOOL", tool:"wire" });
+      if (e.key==="s"||e.key==="S") dispatch({ type:"SET_TOOL", tool:"select" });
+      if (e.key==="g"||e.key==="G") dispatch({ type:"TOGGLE_GRID" });
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [dispatch]);
+
+  const cursor = state.tool==="wire" ? "crosshair" : state.tool==="place" ? "none" : "default";
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ flex:1, display:"block", width:"100%", height:"100%", cursor }}
+      onMouseMove={onMouseMove}
+      onMouseDown={onMouseDown}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+      onContextMenu={e => e.preventDefault()}
+    />
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── PALETTE ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const PALETTE_GROUPS: { label:string; items:ComponentType[] }[] = [
+  { label:"PASSIVE", items:["resistor","capacitor","inductor"] },
+  { label:"SOURCES", items:["vsource","ground"] },
+  { label:"ACTIVE",  items:["switch","led"] },
+];
+
+function Palette({ state, dispatch }: { state:AppState; dispatch:React.Dispatch<Action> }) {
+  const dark = state.darkMode;
+  const bg   = dark ? "#0e1120" : "#fafafa";
+  const bdr  = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const sec  = dark ? "#374151" : "#9ca3af";
+
+  const btn = (active:boolean): React.CSSProperties => ({
+    width:"100%", textAlign:"left",
+    background: active ? (dark?"#0f1f40":"#eff6ff") : "transparent",
+    border:"none", color: active?"#2563eb":(dark?"#64748b":"#374151"),
+    padding:"5px 8px", borderRadius:5, cursor:"pointer",
+    fontSize:12, fontFamily:"'JetBrains Mono',monospace", fontWeight:active?600:400,
+    display:"flex", alignItems:"center", gap:7,
+  });
+  const ico = (color:string): React.CSSProperties => ({
+    display:"inline-flex", alignItems:"center", justifyContent:"center",
+    width:18, height:18, borderRadius:3,
+    background:`${color}20`, color, fontSize:9, fontWeight:700, flexShrink:0,
+  });
+
+  return (
+    <div style={{ width:168, background:bg, borderRight:bdr, display:"flex", flexDirection:"column", padding:"10px 6px", gap:2, overflowY:"auto", flexShrink:0 }}>
+      <div style={{ fontSize:9, letterSpacing:"0.15em", color:sec, fontWeight:700, marginBottom:6, paddingLeft:4, fontFamily:"monospace" }}>⚡ CIRCUIT SANDBOX</div>
+
+      <div style={{ fontSize:9, letterSpacing:"0.1em", color:sec, fontWeight:700, margin:"4px 0 3px 4px", fontFamily:"monospace" }}>TOOLS</div>
+      <button style={btn(state.tool==="select")} onClick={() => dispatch({ type:"SET_TOOL", tool:"select" })}>
+        <span style={ico("#2563eb")}>↖</span> Select
+      </button>
+      <button style={btn(state.tool==="wire")} onClick={() => dispatch({ type:"SET_TOOL", tool:"wire" })}>
+        <span style={ico("#7c3aed")}>⌐</span> Wire
+      </button>
+
+      {PALETTE_GROUPS.map(g => (
+        <div key={g.label}>
+          <div style={{ fontSize:9, letterSpacing:"0.1em", color:sec, fontWeight:700, margin:"10px 0 3px 4px", fontFamily:"monospace" }}>{g.label}</div>
+          {g.items.map(t => {
+            const def    = COMPONENT_DEFS[t];
+            const active = state.tool==="place"&&state.placingType===t;
+            return (
+              <button key={t} style={btn(active)} onClick={() => dispatch({ type:"SET_TOOL", tool:"place", placingType:t })}>
+                <span style={ico(def.color)}>{def.symbol}</span>{def.label}
+              </button>
+            );
+          })}
         </div>
+      ))}
+    </div>
+  );
+}
 
-        <div className="mt-auto space-y-0.5 text-xs text-slate-400 font-mono">
-          <div>Points : {points.length} · Fils : {wires.filter(w => w.endPointId !== null).length}</div>
-          <div>Composants : {components.length}</div>
-          <div>Échelle : {scaleRef.current.toFixed(2)}×</div>
-        </div>
-      </aside>
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── TOOLBAR ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 
-      {/* ── Bottom toolbar ─────────────────────────────────────────────── */}
-      <div className="fixed left-1/2 -translate-x-1/2 bottom-6 z-50">
-        <div className="flex items-center gap-2 bg-white/95 backdrop-blur-md border border-slate-200 rounded-full px-3 py-2 shadow-lg">
+interface ToolbarProps { state:AppState; dispatch:React.Dispatch<Action>; cam:Camera; onShowNetlist:()=>void; }
 
-          {[
-            { id: "cursor" as const, Icon: PiCursor,       label: "Sélection"      },
-            { id: "hand"   as const, Icon: PiHandGrabbing,  label: "Glisser"        },
-            { id: "wires"  as const, Icon: PiPolygon,       label: "Fil électrique" },
-          ].map(({ id, Icon, label }) => (
-            <div key={id} className="relative group">
-              <Button
-                variant={tool === id ? "default" : "ghost"}
-                aria-pressed={tool === id}
-                onClick={() => setTool(id)}
-                aria-label={label}
-                className={`p-2 transition-all ${
-                  tool === id ? "bg-slate-800 text-white" : "hover:bg-slate-100"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-              </Button>
-              <span className="pointer-events-none absolute -top-10 left-1/2 -translate-x-1/2 rounded-md bg-slate-800 text-white text-xs py-1 px-2 whitespace-nowrap opacity-0 scale-95 transition-all group-hover:opacity-100 group-hover:scale-100">
-                {label}
-              </span>
+function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
+  const dark = state.darkMode;
+  const bg   = dark ? "#0e1120" : "#ffffff";
+  const bdr  = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const btn: React.CSSProperties = {
+    background:"transparent", border:"none",
+    color: dark?"#64748b":"#6b7280",
+    fontSize:11, fontFamily:"'JetBrains Mono',monospace",
+    padding:"4px 8px", borderRadius:4, cursor:"pointer",
+  };
+  const sep: React.CSSProperties = { width:1, height:18, background:dark?"#1e293b":"#e5e7eb", margin:"0 3px" };
+
+  const exportCircuit = () => {
+    const json = JSON.stringify({ components:state.components, wires:state.wires }, null, 2);
+    const a = Object.assign(document.createElement("a"), { href:URL.createObjectURL(new Blob([json],{type:"application/json"})), download:"circuit.json" });
+    a.click();
+  };
+  const importCircuit = () => {
+    const inp = Object.assign(document.createElement("input"), { type:"file", accept:".json" });
+    inp.onchange = (e:Event) => {
+      const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return;
+      const r = new FileReader();
+      r.onload = ev => { try { const d = JSON.parse(ev.target?.result as string) as Circuit; dispatch({ type:"LOAD", components:d.components??[], wires:d.wires??[] }); } catch {} };
+      r.readAsText(file);
+    };
+    inp.click();
+  };
+
+  return (
+    <div style={{ height:40, background:bg, borderBottom:bdr, display:"flex", alignItems:"center", padding:"0 10px", gap:3, flexShrink:0 }}>
+      <span style={{ fontSize:9.5, letterSpacing:"0.15em", color:dark?"#3a4060":"#9ca3af", fontWeight:700, fontFamily:"monospace", marginRight:6 }}>⚡ CIRCUIT</span>
+      <button style={btn} onClick={() => dispatch({ type:"UNDO" })}>↩ Undo</button>
+      <button style={btn} onClick={() => dispatch({ type:"REDO" })}>↪ Redo</button>
+      <div style={sep} />
+      <button style={{ ...btn, color:state.showGrid?"#2563eb":undefined }} onClick={() => dispatch({ type:"TOGGLE_GRID" })}>
+        {state.showGrid?"⊞ Grid ✓":"⊞ Grid"}
+      </button>
+      <button style={btn} onClick={() => dispatch({ type:"TOGGLE_DARK" })}>{dark?"☀ Light":"◑ Dark"}</button>
+      <div style={sep} />
+      <button style={btn} onClick={exportCircuit}>↓ Export</button>
+      <button style={btn} onClick={importCircuit}>↑ Import</button>
+      <div style={sep} />
+      <button style={{ ...btn, color:"#2563eb", fontWeight:600 }} onClick={onShowNetlist}>∑ Netlist</button>
+      <div style={sep} />
+      <button style={{ ...btn, color:"#dc2626" }} onClick={() => { dispatch({ type:"LOAD",components:[],wires:[] }); dispatch({ type:"SELECT",ids:[] }); }}>✕ Clear</button>
+      <div style={{ flex:1 }} />
+      <span style={{ fontSize:10, color:dark?"#3a4060":"#9ca3af", fontFamily:"monospace" }}>{Math.round(cam.z*100)}%</span>
+    </div>
+  );
+}
+
+// ─── Status Bar ───────────────────────────────────────────────────────────────
+
+function StatusBar({ state }: { state:AppState }) {
+  const dark = state.darkMode;
+  const tips: Record<ToolMode,string> = {
+    select: "Click to select · Shift+click / drag-box multi-select · R rotate · Del delete · Ctrl+Z/Y undo/redo",
+    wire:   "Click to add vertex · Double-click or ESC to finish · Snaps to terminals",
+    place:  `Click to place ${state.placingType??""} · R to rotate · ESC to cancel`,
+  };
+  return (
+    <div style={{ height:24, background:dark?"#07090f":"#f3f4f6", borderTop:dark?"1px solid #1e293b":"1px solid #e5e7eb", display:"flex", alignItems:"center", padding:"0 10px", gap:14, fontSize:10, fontFamily:"'JetBrains Mono',monospace", color:dark?"#2a3050":"#9ca3af", flexShrink:0 }}>
+      <span>{tips[state.tool]}</span>
+      <div style={{ flex:1 }} />
+      <span>x:{Math.round(state.mouseWorld.x)} y:{Math.round(state.mouseWorld.y)}</span>
+      <span>{state.components.length} comp · {state.wires.length} wires</span>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── ROOT APP ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export default function App() {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const [cam, setCam]     = useState<Camera>({ x:320, y:220, z:1 });
+
+  // Popover state
+  const [popoverComp,   setPopoverComp]   = useState<Component|null>(null);
+  const [popoverAnchor, setPopoverAnchor] = useState<Vec2|null>(null);
+  const [canvasRect,    setCanvasRect]    = useState<DOMRect|null>(null);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
+
+  const [showNetlist, setShowNetlist] = useState(false);
+
+  const dark  = state.darkMode;
+  const empty = state.components.length===0 && state.wires.length===0;
+
+  // Track canvas bounding rect
+  useEffect(() => {
+    const el = canvasWrapRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setCanvasRect(el.getBoundingClientRect()));
+    ro.observe(el);
+    setCanvasRect(el.getBoundingClientRect());
+    return () => ro.disconnect();
+  }, []);
+
+  // Sync popover with selection
+  useEffect(() => {
+    if (state.selection.length === 1) {
+      const comp = state.components.find(c => c.id === state.selection[0]);
+      if (comp) {
+        setPopoverComp(comp);
+        setPopoverAnchor(w2s(comp.position.x, comp.position.y, cam));
+        return;
+      }
+    }
+    setPopoverComp(null);
+    setPopoverAnchor(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.selection]);
+
+  // Keep anchor in sync when component moves or cam changes
+  useEffect(() => {
+    if (!popoverComp) return;
+    const live = state.components.find(c => c.id === popoverComp.id);
+    if (live) {
+      setPopoverComp(live);
+      setPopoverAnchor(w2s(live.position.x, live.position.y, cam));
+    } else {
+      setPopoverComp(null); setPopoverAnchor(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cam, state.components]);
+
+  const handleComponentClick = useCallback((_id:string, screen:Vec2) => {
+    setPopoverAnchor(screen);
+  }, []);
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100vh", width:"100vw", fontFamily:"'JetBrains Mono','Fira Code',monospace", overflow:"hidden", background:dark?"#0a0c14":"#ffffff" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+        *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+        ::-webkit-scrollbar { width:5px; }
+        ::-webkit-scrollbar-thumb { background:${dark?"#1e293b":"#d1d5db"}; border-radius:3px; }
+        button:hover { opacity:.82; }
+        input[type=number] { -moz-appearance:textfield; }
+        input[type=number]::-webkit-inner-spin-button { opacity:.5; }
+        select option { background:${dark?"#0e1120":"#ffffff"}; }
+        [data-radix-popper-content-wrapper] { z-index:1000 !important; }
+      `}</style>
+
+      <Toolbar state={state} dispatch={dispatch} cam={cam} onShowNetlist={() => setShowNetlist(true)} />
+
+      <div style={{ display:"flex", flex:1, overflow:"hidden" }}>
+        <Palette state={state} dispatch={dispatch} />
+
+        {/* Canvas — no right sidebar */}
+        <div ref={canvasWrapRef} style={{ flex:1, position:"relative", overflow:"hidden" }}>
+          <CircuitCanvas
+            state={state} dispatch={dispatch}
+            cam={cam} setCam={setCam}
+            onComponentClick={handleComponentClick}
+          />
+
+          {empty && (
+            <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", textAlign:"center", pointerEvents:"none" }}>
+              <div style={{ fontSize:36, opacity:.07 }}>⚡</div>
+              <div style={{ fontSize:11, color:dark?"#2a3050":"#9ca3af", fontFamily:"monospace", lineHeight:2.2, marginTop:8 }}>
+                Select a component from the palette<br/>then click on the canvas to place it
+              </div>
             </div>
-          ))}
+          )}
 
-          <div className="mx-1 h-7 w-px bg-slate-200" />
-
-          <Button variant="outline" size="sm" className="flex items-center gap-1.5 px-3 text-sm">
-            <FiPlay className="h-3.5 w-3.5" /> Démarrer
-          </Button>
-
-          <Button size="sm" className="flex items-center gap-1.5 px-3 text-sm">
-            <PiPause className="h-3.5 w-3.5" /> Pause
-          </Button>
-
-          <Button variant="ghost" aria-label="Settings" className="p-2 hover:bg-slate-100">
-            <LuSettings className="h-4 w-4" />
-          </Button>
+          {/* Canvas-anchored property popover */}
+          <ComponentPopover
+            comp={popoverComp}
+            anchorScreen={popoverAnchor}
+            canvasRect={canvasRect}
+            dark={dark}
+            dispatch={dispatch}
+          />
         </div>
       </div>
+
+      <StatusBar state={state} />
+
+      {showNetlist && (
+        <NetlistModal
+          circuit={{ components:state.components, wires:state.wires }}
+          dark={dark}
+          onClose={() => setShowNetlist(false)}
+        />
+      )}
     </div>
   );
 }
