@@ -47,7 +47,7 @@ const UI = {
   rotate:         "↻ Rotation 90°",
   deleteComp:     "✕ Supprimer",
 
-  netlistTitle:   "Netlist (SPICE / MNA)",
+  netlistTitle:   "Netlist",
   warnings:       (n: number) => `${n} avertissement${n > 1 ? "s" : ""}`,
   copy:           "Copier",
   copied:         "✓ Copié",
