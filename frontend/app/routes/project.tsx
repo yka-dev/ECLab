@@ -1,24 +1,13 @@
-/**
- * Circuit Sandbox Editor
- * ─────────────────────────────────────────────────────────────────────────────
- * Revision notes:
- *  1. Light mode by default; theme persisted in localStorage.
- *  2. Right sidebar removed — replaced with a canvas-anchored Radix popover.
- *  3. Circuit → Netlist conversion layer (generateNetlist / netlistToString)
- *     suitable for Modified Nodal Analysis (MNA).
- *
- * Install peer dependency if not already present:
- *   npm install @radix-ui/react-popover
- */
-
 import {
   useCallback,
   useEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
 } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
+import { createSimulationWorker } from "simulation";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -27,15 +16,62 @@ const ZOOM_MIN = 0.12;
 const ZOOM_MAX = 6;
 const THEME_STORAGE_KEY = "circuit-sandbox-theme";
 
+// ─── UI Strings (French) ─────────────────────────────────────────────────────
+
+const UI = {
+  appTitle:       "⚡ CIRCUIT",
+  sandboxTitle:   "⚡ CIRCUIT SANDBOX",
+  toolsHeader:    "OUTILS",
+  select:         "Sélection",
+  wire:           "Fil",
+  passive:        "PASSIFS",
+  sources:        "SOURCES",
+  active:         "ACTIFS",
+
+  undo:           "↩ Annuler",
+  redo:           "↪ Rétablir",
+  gridOff:        "⊞ Grille",
+  gridOn:         "⊞ Grille ✓",
+  light:          "☀ Clair",
+  dark:           "◑ Sombre",
+  netlistBtn:     "∑ Netlist",
+  clearBtn:       "✕ Effacer",
+
+  tipSelect:      "Cliquer pour sélectionner · Shift+clic / glisser multi-sélect · R rotation · Suppr · Ctrl+Z/Y annuler/rétablir",
+  tipWire:        "Cliquer pour ajouter un point · Double-clic ou ESC pour terminer · Accrochage aux bornes",
+  tipPlace:       (t: string) => `Cliquer pour placer ${t} · R rotation · ESC pour annuler`,
+
+  noProps:        "Aucune propriété configurable.",
+  closed:         "Fermé",
+  open:           "Ouvert",
+  rotate:         "↻ Rotation 90°",
+  deleteComp:     "✕ Supprimer",
+
+  netlistTitle:   "Netlist (SPICE / MNA)",
+  warnings:       (n: number) => `${n} avertissement${n > 1 ? "s" : ""}`,
+  copy:           "Copier",
+  copied:         "✓ Copié",
+  nodes:          "Nœuds :",
+  elements:       "Éléments :",
+  emptyCircuit:   "* Circuit vide",
+
+  emptyHint:      "Sélectionnez un composant dans la palette\npuis cliquez sur la toile pour le placer",
+
+  graphTitle:     "GRAPHIQUES",
+  addGraph:       "+",
+  chooseComp:     "Choisir un composant...",
+  simulate:       "▶ Simuler",
+  simRunning:     "Simulation...",
+  noData:         "Aucune donnée — lancez la simulation",
+  noCompSel:      "Sélectionnez un composant",
+  dcResult:       (v: number) => `Régime continu : ${v.toPrecision(4)} V`,
+  simErrPrefix:   "Erreur : ",
+} as const;
+
 // ─── Core Types ───────────────────────────────────────────────────────────────
 
 export interface Vec2 { x: number; y: number; }
-
-export interface Terminal {
-  /** Grid-unit offset from component origin */
-  x: number;
-  y: number;
-}
+export interface Terminal { x: number; y: number; }
 
 export type ComponentType =
   | "resistor" | "capacitor" | "inductor"
@@ -52,45 +88,54 @@ export interface Component {
 }
 
 export interface Wire { id: string; points: Vec2[]; }
-
 export interface Circuit { components: Component[]; wires: Wire[]; }
 
+// ─── Simulation Types ─────────────────────────────────────────────────────────
+
+interface SimPoint {
+  time: number;
+  nodeVoltages: Record<string, number>;
+  sourceCurrents: Record<string, number>;
+}
+
+interface SimResult {
+  nodeVoltages: Record<string, number>;
+  sourceCurrents: Record<string, number>;
+  timeSeries?: SimPoint[];
+  error?: string;
+}
+
+interface GraphConfig {
+  id: string;
+  componentName: string | null;
+}
+
 // ─── Component Property Schema ────────────────────────────────────────────────
-//
-// Single authoritative source for:
-//   • default prop values
-//   • form field rendering inside the popover
-//
-// No per-component switch is needed in rendering code.
 
 type PropFieldType = "number" | "boolean" | "select";
-
 interface PropFieldBase { label: string; type: PropFieldType; default: unknown; }
 interface NumberField extends PropFieldBase { type: "number"; default: number; min?: number; step?: number; }
 interface BoolField   extends PropFieldBase { type: "boolean"; default: boolean; }
 interface SelectField extends PropFieldBase { type: "select";  default: string;  options: string[]; }
 type PropField = NumberField | BoolField | SelectField;
-
 type ComponentPropertySchema = Record<string, PropField>;
 
 const PROP_SCHEMAS: Record<ComponentType, ComponentPropertySchema> = {
-  resistor:  { resistance:    { label: "Resistance (Ω)", type: "number",  default: 1000,    min: 0, step: 100 } },
-  capacitor: { capacitance:   { label: "Capacitance (F)",type: "number",  default: 1e-6,    min: 0 } },
-  inductor:  { inductance:    { label: "Inductance (H)", type: "number",  default: 1e-3,    min: 0 } },
-  vsource:   { voltage:       { label: "Voltage (V)",    type: "number",  default: 5,       step: 0.5 } },
+  resistor:  { resistance:    { label: "Résistance (Ω)",       type: "number",  default: 1000,  min: 0, step: 100 } },
+  capacitor: { capacitance:   { label: "Capacité (F)",          type: "number",  default: 1e-6,  min: 0 } },
+  inductor:  { inductance:    { label: "Inductance (H)",         type: "number",  default: 1e-3,  min: 0 } },
+  vsource:   { voltage:       { label: "Tension (V)",            type: "number",  default: 5,     step: 0.5 } },
   ground:    {},
-  switch:    { closed:        { label: "Closed",         type: "boolean", default: false } },
+  switch:    { closed:        { label: "Fermé",                  type: "boolean", default: false } },
   led: {
-    color:          { label: "LED Color",      type: "select",  default: "red", options: ["red","green","blue","yellow","white"] },
-    forwardVoltage: { label: "Forward Vf (V)", type: "number",  default: 2.0,   min: 0, step: 0.1 },
+    color:          { label: "Couleur LED",          type: "select",  default: "red", options: ["red","green","blue","yellow","white"] },
+    forwardVoltage: { label: "Tension seuil Vf (V)", type: "number",  default: 2.0,   min: 0, step: 0.1 },
   },
 };
 
 function defaultPropsFromSchema(schema: ComponentPropertySchema): Record<string, unknown> {
   return Object.fromEntries(Object.entries(schema).map(([k, f]) => [k, f.default]));
 }
-
-// ─── Internal PropDef shape (for draw() compat) ───────────────────────────────
 
 interface NumberPropDef { key: string; label: string; type: "number"; min?: number; step?: number; }
 interface BoolPropDef   { key: string; label: string; type: "boolean"; }
@@ -102,7 +147,7 @@ type PropDef = NumberPropDef | BoolPropDef | SelectPropDef;
 interface ComponentDef {
   label: string;
   symbol: string;
-  color: string; // light-mode schematic color
+  color: string;
   terminals: Terminal[];
   defaultProps: Record<string, unknown>;
   propDefs: PropDef[];
@@ -142,20 +187,18 @@ function fmtHenry(v: number): string {
   return `${+(v*1e6).toPrecision(3)}μH`;
 }
 
-// ─── Schematic colors (accessible on both white & dark canvas) ────────────────
-
-const colSel  = "#2563eb"; // blue — selected
-const colHov  = "#7c3aed"; // violet — hovered
+const colSel = "#2563eb";
+const colHov = "#7c3aed";
 
 // ─── Component Definitions ────────────────────────────────────────────────────
 
 const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
 
   resistor: {
-    label: "Resistor", symbol: "R", color: "#92400e",
+    label: "Résistance", symbol: "R", color: "#92400e",
     terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.resistor),
-    propDefs: [{ key:"resistance", label:"Resistance (Ω)", type:"number", min:0, step:100 }],
+    propDefs: [{ key:"resistance", label:"Résistance (Ω)", type:"number", min:0, step:100 }],
     draw(ctx, comp, sel, hov) {
       const w = GRID*1.35, h = GRID*0.5, col = sel ? colSel : hov ? colHov : "#92400e";
       ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
@@ -171,10 +214,10 @@ const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
   },
 
   capacitor: {
-    label: "Capacitor", symbol: "C", color: "#065f46",
+    label: "Condensateur", symbol: "C", color: "#065f46",
     terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.capacitor),
-    propDefs: [{ key:"capacitance", label:"Capacitance (F)", type:"number", min:0 }],
+    propDefs: [{ key:"capacitance", label:"Capacité (F)", type:"number", min:0 }],
     draw(ctx, comp, sel, hov) {
       const gap = 7, col = sel ? colSel : hov ? colHov : "#065f46";
       ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
@@ -194,7 +237,7 @@ const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
   },
 
   inductor: {
-    label: "Inductor", symbol: "L", color: "#4c1d95",
+    label: "Inducteur", symbol: "L", color: "#4c1d95",
     terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.inductor),
     propDefs: [{ key:"inductance", label:"Inductance (H)", type:"number", min:0 }],
@@ -212,10 +255,10 @@ const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
   },
 
   vsource: {
-    label: "Voltage Source", symbol: "V", color: "#991b1b",
+    label: "Source de tension", symbol: "V", color: "#991b1b",
     terminals: [{ x:0, y:-2 }, { x:0, y:2 }],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.vsource),
-    propDefs: [{ key:"voltage", label:"Voltage (V)", type:"number", step:0.5 }],
+    propDefs: [{ key:"voltage", label:"Tension (V)", type:"number", step:0.5 }],
     draw(ctx, comp, sel, hov) {
       const r = GRID*0.85, col = sel ? colSel : hov ? colHov : "#991b1b";
       ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
@@ -233,7 +276,7 @@ const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
   },
 
   ground: {
-    label: "Ground", symbol: "GND", color: "#1f2937",
+    label: "Masse", symbol: "GND", color: "#1f2937",
     terminals: [{ x:0, y:-1 }],
     defaultProps: {},
     propDefs: [],
@@ -247,10 +290,10 @@ const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
   },
 
   switch: {
-    label: "Switch", symbol: "SW", color: "#14532d",
+    label: "Interrupteur", symbol: "SW", color: "#14532d",
     terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.switch),
-    propDefs: [{ key:"closed", label:"Closed", type:"boolean" }],
+    propDefs: [{ key:"closed", label:"Fermé", type:"boolean" }],
     draw(ctx, comp, sel, hov) {
       const col = sel ? colSel : hov ? colHov : "#14532d", r = GRID*0.2;
       ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
@@ -272,8 +315,8 @@ const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
     terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.led),
     propDefs: [
-      { key:"color", label:"LED Color", type:"select", options:["red","green","blue","yellow","white"] },
-      { key:"forwardVoltage", label:"Forward Vf (V)", type:"number", min:0, step:0.1 },
+      { key:"color", label:"Couleur LED", type:"select", options:["red","green","blue","yellow","white"] },
+      { key:"forwardVoltage", label:"Tension seuil Vf (V)", type:"number", min:0, step:0.1 },
     ],
     draw(ctx, comp, sel, hov) {
       const col = sel ? colSel : hov ? colHov : "#9a3412", s = GRID*0.7;
@@ -316,8 +359,6 @@ function termWorlds(comp: Component): Vec2[] {
   });
 }
 
-// ─── Orthogonal routing ───────────────────────────────────────────────────────
-
 function orthoRoute(a: Vec2, b: Vec2): Vec2[] {
   const pts: Vec2[] = [{ ...a }];
   if (a.x !== b.x) pts.push({ x: b.x, y: a.y });
@@ -326,16 +367,12 @@ function orthoRoute(a: Vec2, b: Vec2): Vec2[] {
   return pts;
 }
 
-// ─── Snap to nearest terminal / wire endpoint ────────────────────────────────
-
 function snapToNearby(components: Component[], wires: Wire[], world: Vec2, radius = GRID * 0.85): Vec2 {
   let best = radius, pt = snapVec(world);
   for (const c of components) for (const t of termWorlds(c)) { const d = dist(t, world); if (d < best) { best = d; pt = snapVec(t); } }
   for (const w of wires) for (const p of w.points) { const d = dist(p, world); if (d < best) { best = d; pt = snapVec(p); } }
   return pt;
 }
-
-// ─── Hit testing ─────────────────────────────────────────────────────────────
 
 function hitComponent(comp: Component, pt: Vec2): boolean {
   const ts = termWorlds(comp);
@@ -364,8 +401,6 @@ function hitTest(components: Component[], wires: Wire[], pt: Vec2): string | nul
   for (let i = wires.length-1; i >= 0; i--)  if (hitWire(wires[i], pt)) return wires[i].id;
   return null;
 }
-
-// ─── Junction detection ───────────────────────────────────────────────────────
 
 function findJunctions(components: Component[], wires: Wire[]): Vec2[] {
   const result: Vec2[] = [], candidates: Vec2[] = [];
@@ -398,30 +433,22 @@ export interface Netlist {
   warnings: string[];
 }
 
-/**
- * Union-Find over snapped Vec2 keys for node grouping.
- */
 class UnionFind {
   private parent = new Map<string, string>();
-
   private key(p: Vec2): string { return `${snap(p.x)},${snap(p.y)}`; }
-
   add(p: Vec2): string {
     const k = this.key(p);
     if (!this.parent.has(k)) this.parent.set(k, k);
     return k;
   }
-
   find(p: Vec2): string {
     let k = this.add(p);
     while (this.parent.get(k) !== k) {
-      // path-compression one step
       this.parent.set(k, this.parent.get(this.parent.get(k)!)!);
       k = this.parent.get(k)!;
     }
     return k;
   }
-
   union(a: Vec2, b: Vec2): void {
     this.add(a); this.add(b);
     const ra = this.find(a), rb = this.find(b);
@@ -429,30 +456,16 @@ class UnionFind {
   }
 }
 
-/**
- * Convert the current circuit into an MNA-ready Netlist.
- *
- * Algorithm
- * ─────────
- * 1. Walk every wire, union-ing consecutive points into one electrical node.
- * 2. Register all component terminals and connect them to wire endpoints
- *    that are within snapping distance.
- * 3. Any terminal of a "ground" component forces its root to node "0".
- * 4. Remaining roots get sequential integer IDs ("1", "2", …).
- * 5. Each component is mapped to a NetlistComponent.
- */
 export function generateNetlist(circuit: Circuit): Netlist {
   const warnings: string[] = [];
   const uf = new UnionFind();
 
-  // 1. Union wire segments
   for (const wire of circuit.wires) {
     if (wire.points.length === 0) continue;
     wire.points.forEach(p => uf.add(p));
     for (let i = 0; i < wire.points.length-1; i++) uf.union(wire.points[i], wire.points[i+1]);
   }
 
-  // 2. Register terminals, connect to nearby wire points
   for (const comp of circuit.components) {
     for (const tw of termWorlds(comp)) {
       uf.add(tw);
@@ -464,7 +477,6 @@ export function generateNetlist(circuit: Circuit): Netlist {
     }
   }
 
-  // 3. Ground roots → node "0"
   const groundRoots = new Set<string>();
   for (const comp of circuit.components) {
     if (comp.type === "ground") {
@@ -472,9 +484,8 @@ export function generateNetlist(circuit: Circuit): Netlist {
       if (tw) groundRoots.add(uf.find(tw));
     }
   }
-  if (groundRoots.size === 0) warnings.push("No ground component found. Node '0' will not be defined.");
+  if (groundRoots.size === 0) warnings.push("Aucun composant de masse trouvé. Le nœud '0' ne sera pas défini.");
 
-  // 4. Assign node IDs
   const rootToNode = new Map<string, string>();
   for (const gr of groundRoots) rootToNode.set(gr, "0");
   let nextNode = 1;
@@ -485,7 +496,6 @@ export function generateNetlist(circuit: Circuit): Netlist {
     return rootToNode.get(root)!;
   };
 
-  // 5. Map components
   const nlComps: NetlistComponent[] = [];
   const counters: Record<string, number> = {};
   const nextName = (prefix: string) => { counters[prefix] = (counters[prefix] ?? 0) + 1; return `${prefix}${counters[prefix]}`; };
@@ -512,11 +522,10 @@ export function generateNetlist(circuit: Circuit): Netlist {
         nlComps.push({ type: "S", name: nextName("S"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), state: comp.props.closed as boolean });
         break;
       case "ground":
-        break; // handled via node "0" assignment only
+        break;
     }
   }
 
-  // Collect nodes and detect floating ones
   const nodeSet = new Set<string>();
   for (const nc of nlComps) { nodeSet.add(nc.n1); nodeSet.add(nc.n2); }
   const nodeCount = new Map<string, number>();
@@ -525,7 +534,7 @@ export function generateNetlist(circuit: Circuit): Netlist {
     nodeCount.set(nc.n2, (nodeCount.get(nc.n2) ?? 0) + 1);
   }
   for (const [node, count] of nodeCount) {
-    if (count < 2) warnings.push(`Node ${node} appears to be floating (only 1 connection).`);
+    if (count < 2) warnings.push(`Le nœud ${node} semble flottant (1 seule connexion).`);
   }
 
   const nodes = Array.from(nodeSet).sort((a, b) => {
@@ -536,14 +545,6 @@ export function generateNetlist(circuit: Circuit): Netlist {
   return { nodes, components: nlComps, warnings };
 }
 
-/**
- * Serialize a Netlist to SPICE-style text.
- *
- * Example:
- *   V1 1 0 5
- *   R1 1 2 1000
- *   D1 2 0 VF=2
- */
 export function netlistToString(netlist: Netlist): string {
   const lines: string[] = [];
   for (const nc of netlist.components) {
@@ -558,9 +559,22 @@ export function netlistToString(netlist: Netlist): string {
   }
   if (netlist.warnings.length > 0) {
     lines.push("");
-    for (const w of netlist.warnings) lines.push(`* WARNING: ${w}`);
+    for (const w of netlist.warnings) lines.push(`* AVERT: ${w}`);
   }
   return lines.join("\n");
+}
+
+// ─── Format netlist component for dropdown ────────────────────────────────────
+
+function fmtNetlistComp(nc: NetlistComponent): string {
+  switch (nc.type) {
+    case "R": return `${nc.name} — ${fmtOhm(nc.value)}`;
+    case "C": return `${nc.name} — ${fmtFarad(nc.value)}`;
+    case "L": return `${nc.name} — ${fmtHenry(nc.value)}`;
+    case "V": return `${nc.name} — ${nc.value}V`;
+    case "D": return `${nc.name} — LED ${nc.vf}V`;
+    case "S": return `${nc.name} — ${nc.state ? UI.closed : UI.open}`;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -575,8 +589,8 @@ function readPersistedTheme(): boolean {
     const v = localStorage.getItem(THEME_STORAGE_KEY);
     if (v === "dark")  return true;
     if (v === "light") return false;
-  } catch { /* SSR / private browsing */ }
-  return false; // ← light mode by default
+  } catch { /* SSR */ }
+  return false;
 }
 
 interface AppState {
@@ -703,7 +717,6 @@ function renderCanvas(
   const H = ctx.canvas.height / (window.devicePixelRatio || 1);
   const dark = state.darkMode;
 
-  // Light-mode palette (high contrast on white)
   const bg         = dark ? "#0a0c14" : "#ffffff";
   const gridLine   = dark ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.07)";
   const gridAccent = dark ? "rgba(255,255,255,.1)"  : "rgba(0,0,0,.18)";
@@ -714,7 +727,6 @@ function renderCanvas(
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  // Grid
   if (state.showGrid) {
     const tl = s2w(0,0,cam), br = s2w(W,H,cam);
     const startX = Math.floor(tl.x/GRID)*GRID, startY = Math.floor(tl.y/GRID)*GRID;
@@ -731,7 +743,6 @@ function renderCanvas(
     }
   }
 
-  // Wires
   for (const wire of state.wires) {
     const sel = state.selection.includes(wire.id);
     const hov = hoverId === wire.id;
@@ -745,7 +756,6 @@ function renderCanvas(
     ctx.stroke();
   }
 
-  // Components
   for (const comp of state.components) {
     const def = COMPONENT_DEFS[comp.type];
     if (!def) continue;
@@ -779,14 +789,12 @@ function renderCanvas(
     }
   }
 
-  // Junctions
   for (const j of findJunctions(state.components, state.wires)) {
     const js = w2s(j.x, j.y, cam);
     ctx.beginPath(); ctx.arc(js.x, js.y, 4.5*cam.z, 0, Math.PI*2);
     ctx.fillStyle = juncCol; ctx.fill();
   }
 
-  // Wire preview
   if (state.tool === "wire" && state.wirePoints.length > 0) {
     const endPt = snapToNearby(state.components, state.wires, state.mouseWorld);
     const chain = [...state.wirePoints, endPt];
@@ -807,7 +815,6 @@ function renderCanvas(
     ctx.beginPath(); ctx.arc(ep.x,ep.y,4,0,Math.PI*2); ctx.fillStyle="rgba(37,99,235,.55)"; ctx.fill();
   }
 
-  // Ghost placement preview
   if (state.tool === "place" && state.ghostPos && state.placingType) {
     const def = COMPONENT_DEFS[state.placingType];
     const sp  = w2s(state.ghostPos.x, state.ghostPos.y, cam);
@@ -821,7 +828,6 @@ function renderCanvas(
     ctx.beginPath(); ctx.moveTo(0,sp.y); ctx.lineTo(W,sp.y); ctx.stroke();
   }
 
-  // Drag-select box
   if (dragBox) {
     const x=Math.min(dragBox.sx,dragBox.ex), y=Math.min(dragBox.sy,dragBox.ey);
     const w=Math.abs(dragBox.ex-dragBox.sx), h=Math.abs(dragBox.ey-dragBox.sy);
@@ -832,7 +838,7 @@ function renderCanvas(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ─── COMPONENT PROPERTY RENDERER  (schema-driven, no per-type switch) ─────────
+// ─── COMPONENT PROPERTY RENDERER ─────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface ComponentPropertyRendererProps {
@@ -856,7 +862,7 @@ function ComponentPropertyRenderer({ comp, dark, dispatch }: ComponentPropertyRe
   };
 
   if (entries.length === 0) {
-    return <p style={{ fontSize:11, color:textMuted, fontFamily:"monospace" }}>No configurable properties.</p>;
+    return <p style={{ fontSize:11, color:textMuted, fontFamily:"monospace" }}>{UI.noProps}</p>;
   }
 
   return (
@@ -870,7 +876,6 @@ function ComponentPropertyRenderer({ comp, dark, dispatch }: ComponentPropertyRe
             </label>
 
             {field.type === "boolean" ? (
-              /* Custom toggle — no checkbox, cleaner look */
               <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
                 <div
                   role="checkbox"
@@ -891,7 +896,7 @@ function ComponentPropertyRenderer({ comp, dark, dispatch }: ComponentPropertyRe
                   }} />
                 </div>
                 <span style={{ fontSize:12, fontFamily:"monospace", color:dark?"#94a3b8":"#374151" }}>
-                  {value ? "Closed" : "Open"}
+                  {value ? UI.closed : UI.open}
                 </span>
               </label>
 
@@ -927,9 +932,7 @@ function ComponentPropertyRenderer({ comp, dark, dispatch }: ComponentPropertyRe
 
 interface ComponentPopoverProps {
   comp: Component | null;
-  /** Position relative to the canvas wrapper element */
   anchorScreen: Vec2 | null;
-  /** Bounding rect of the canvas wrapper (for viewport clamping) */
   canvasRect: DOMRect | null;
   dark: boolean;
   dispatch: React.Dispatch<Action>;
@@ -939,7 +942,6 @@ function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: Co
   const open = comp !== null && anchorScreen !== null;
   const def  = comp ? COMPONENT_DEFS[comp.type] : null;
 
-  // Convert canvas-relative position → viewport-absolute
   const absAnchor = anchorScreen && canvasRect
     ? {
         x: Math.max(8, Math.min(window.innerWidth  - 8, canvasRect.left + anchorScreen.x)),
@@ -960,10 +962,6 @@ function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: Co
 
   return (
     <PopoverPrimitive.Root open={open}>
-      {/*
-        Invisible 0×0 anchor fixed at the component's screen position.
-        Radix positions PopoverContent relative to this element.
-      */}
       <PopoverPrimitive.Anchor
         style={{
           position: "fixed",
@@ -993,7 +991,6 @@ function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: Co
         >
           {comp && def && (
             <>
-              {/* ── Header ── */}
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
                 <span style={{
                   display:"inline-flex", alignItems:"center", justifyContent:"center",
@@ -1009,7 +1006,7 @@ function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: Co
                 </div>
                 <PopoverPrimitive.Close
                   onClick={() => dispatch({ type:"SELECT", ids:[] })}
-                  aria-label="Close"
+                  aria-label="Fermer"
                   style={{ background:"transparent", border:"none", color:textMut, cursor:"pointer", fontSize:16, lineHeight:1, padding:"2px 4px", borderRadius:3 }}
                 >
                   ×
@@ -1020,13 +1017,11 @@ function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: Co
                 pos ({Math.round(comp.position.x)}, {Math.round(comp.position.y)}) · rot {comp.rotation}°
               </div>
 
-              {/* ── Schema-driven fields ── */}
               <ComponentPropertyRenderer comp={comp} dark={dark} dispatch={dispatch} />
 
-              {/* ── Actions ── */}
               <div style={{ borderTop: dark?"1px solid #1e293b":"1px solid #e5e7eb", paddingTop:8, marginTop:2 }}>
-                <button style={actBase} onClick={() => dispatch({ type:"ROTATE_SELECTED" })}>↻ Rotate 90°</button>
-                <button style={{ ...actBase, color:"#dc2626", marginBottom:0 }} onClick={() => dispatch({ type:"DELETE_SELECTED" })}>✕ Delete</button>
+                <button style={actBase} onClick={() => dispatch({ type:"ROTATE_SELECTED" })}>{UI.rotate}</button>
+                <button style={{ ...actBase, color:"#dc2626", marginBottom:0 }} onClick={() => dispatch({ type:"DELETE_SELECTED" })}>{UI.deleteComp}</button>
               </div>
             </>
           )}
@@ -1068,31 +1063,27 @@ function NetlistModal({ circuit, dark, onClose }: NetlistModalProps) {
           overflow:"hidden", fontFamily:"'JetBrains Mono',monospace",
         }}
       >
-        {/* Header */}
         <div style={{ padding:"13px 16px", borderBottom:border, display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ fontSize:13, fontWeight:600, color:textPri }}>Netlist  (SPICE / MNA)</span>
+          <span style={{ fontSize:13, fontWeight:600, color:textPri }}>{UI.netlistTitle}</span>
           <div style={{ flex:1 }} />
           {netlist.warnings.length > 0 && (
             <span style={{ fontSize:10, color:"#b45309", background:"#fef3c7", borderRadius:4, padding:"2px 8px" }}>
-              {netlist.warnings.length} warning{netlist.warnings.length>1?"s":""}
+              {UI.warnings(netlist.warnings.length)}
             </span>
           )}
-          <button onClick={copy}    style={{ fontSize:11, color:copied?"#15803d":"#2563eb", background:"transparent", border:"none", cursor:"pointer" }}>{copied ? "✓ Copied" : "Copy"}</button>
+          <button onClick={copy}    style={{ fontSize:11, color:copied?"#15803d":"#2563eb", background:"transparent", border:"none", cursor:"pointer" }}>{copied ? UI.copied : UI.copy}</button>
           <button onClick={onClose} style={{ fontSize:16, color:textMut, background:"transparent", border:"none", cursor:"pointer", lineHeight:1 }}>×</button>
         </div>
 
-        {/* Node summary */}
         <div style={{ padding:"8px 16px", borderBottom:border, display:"flex", gap:14, flexWrap:"wrap" }}>
-          <span style={{ fontSize:10, color:textMut }}>Nodes: <strong style={{ color:textPri }}>{netlist.nodes.join(", ")||"—"}</strong></span>
-          <span style={{ fontSize:10, color:textMut }}>Elements: <strong style={{ color:textPri }}>{netlist.components.length}</strong></span>
+          <span style={{ fontSize:10, color:textMut }}>{UI.nodes} <strong style={{ color:textPri }}>{netlist.nodes.join(", ")||"—"}</strong></span>
+          <span style={{ fontSize:10, color:textMut }}>{UI.elements} <strong style={{ color:textPri }}>{netlist.components.length}</strong></span>
         </div>
 
-        {/* Netlist text */}
         <pre style={{ flex:1, overflowY:"auto", margin:0, padding:"12px 16px", fontSize:12, lineHeight:1.9, color:textPri, background:codeBg, whiteSpace:"pre-wrap", wordBreak:"break-all" }}>
-          {text || "* Empty circuit"}
+          {text || UI.emptyCircuit}
         </pre>
 
-        {/* Warnings */}
         {netlist.warnings.length > 0 && (
           <div style={{ padding:"10px 16px", borderTop:border, display:"flex", flexDirection:"column", gap:4 }}>
             {netlist.warnings.map((w,i) => (
@@ -1106,7 +1097,7 @@ function NetlistModal({ circuit, dark, onClose }: NetlistModalProps) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ─── CIRCUIT CANVAS COMPONENT ────────────────────────────────────────────────
+// ─── CIRCUIT CANVAS ───────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface MoveDrag { type:"move"; startWorld:Vec2; lastDx:number; lastDy:number; }
@@ -1118,7 +1109,6 @@ interface CircuitCanvasProps {
   dispatch: React.Dispatch<Action>;
   cam: Camera;
   setCam: React.Dispatch<React.SetStateAction<Camera>>;
-  /** Called when user clicks a component in select mode. */
   onComponentClick: (compId: string, canvasRelativeScreen: Vec2) => void;
 }
 
@@ -1134,7 +1124,6 @@ function CircuitCanvas({ state, dispatch, cam, setCam, onComponentClick }: Circu
   stateRef.current = state;
   camRef.current   = cam;
 
-  // Resize
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const resize = () => {
@@ -1147,7 +1136,6 @@ function CircuitCanvas({ state, dispatch, cam, setCam, onComponentClick }: Circu
     return () => ro.disconnect();
   }, []);
 
-  // Render
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext("2d"); if (!ctx) return;
@@ -1163,7 +1151,6 @@ function CircuitCanvas({ state, dispatch, cam, setCam, onComponentClick }: Circu
     return { x: e.clientX-r.left, y: e.clientY-r.top };
   }, []);
 
-  // Wheel (non-passive)
   const onWheel = useCallback((e:WheelEvent) => {
     e.preventDefault();
     const r = canvasRef.current!.getBoundingClientRect();
@@ -1255,7 +1242,6 @@ function CircuitCanvas({ state, dispatch, cam, setCam, onComponentClick }: Circu
 
   const onMouseUp = useCallback(() => { panRef.current=null; dragRef.current=null; setDragBox(null); }, []);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e:KeyboardEvent) => {
       const tag = (document.activeElement as HTMLElement|null)?.tagName;
@@ -1303,9 +1289,9 @@ function CircuitCanvas({ state, dispatch, cam, setCam, onComponentClick }: Circu
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const PALETTE_GROUPS: { label:string; items:ComponentType[] }[] = [
-  { label:"PASSIVE", items:["resistor","capacitor","inductor"] },
-  { label:"SOURCES", items:["vsource","ground"] },
-  { label:"ACTIVE",  items:["switch","led"] },
+  { label: UI.passive, items:["resistor","capacitor","inductor"] },
+  { label: UI.sources, items:["vsource","ground"] },
+  { label: UI.active,  items:["switch","led"] },
 ];
 
 function Palette({ state, dispatch }: { state:AppState; dispatch:React.Dispatch<Action> }) {
@@ -1330,14 +1316,14 @@ function Palette({ state, dispatch }: { state:AppState; dispatch:React.Dispatch<
 
   return (
     <div style={{ width:168, background:bg, borderRight:bdr, display:"flex", flexDirection:"column", padding:"10px 6px", gap:2, overflowY:"auto", flexShrink:0 }}>
-      <div style={{ fontSize:9, letterSpacing:"0.15em", color:sec, fontWeight:700, marginBottom:6, paddingLeft:4, fontFamily:"monospace" }}>⚡ CIRCUIT SANDBOX</div>
+      <div style={{ fontSize:9, letterSpacing:"0.15em", color:sec, fontWeight:700, marginBottom:6, paddingLeft:4, fontFamily:"monospace" }}>{UI.sandboxTitle}</div>
 
-      <div style={{ fontSize:9, letterSpacing:"0.1em", color:sec, fontWeight:700, margin:"4px 0 3px 4px", fontFamily:"monospace" }}>TOOLS</div>
+      <div style={{ fontSize:9, letterSpacing:"0.1em", color:sec, fontWeight:700, margin:"4px 0 3px 4px", fontFamily:"monospace" }}>{UI.toolsHeader}</div>
       <button style={btn(state.tool==="select")} onClick={() => dispatch({ type:"SET_TOOL", tool:"select" })}>
-        <span style={ico("#2563eb")}>↖</span> Select
+        <span style={ico("#2563eb")}>↖</span> {UI.select}
       </button>
       <button style={btn(state.tool==="wire")} onClick={() => dispatch({ type:"SET_TOOL", tool:"wire" })}>
-        <span style={ico("#7c3aed")}>⌐</span> Wire
+        <span style={ico("#7c3aed")}>⌐</span> {UI.wire}
       </button>
 
       {PALETTE_GROUPS.map(g => (
@@ -1362,7 +1348,12 @@ function Palette({ state, dispatch }: { state:AppState; dispatch:React.Dispatch<
 // ─── TOOLBAR ─────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-interface ToolbarProps { state:AppState; dispatch:React.Dispatch<Action>; cam:Camera; onShowNetlist:()=>void; }
+interface ToolbarProps {
+  state: AppState;
+  dispatch: React.Dispatch<Action>;
+  cam: Camera;
+  onShowNetlist: () => void;
+}
 
 function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
   const dark = state.darkMode;
@@ -1376,39 +1367,26 @@ function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
   };
   const sep: React.CSSProperties = { width:1, height:18, background:dark?"#1e293b":"#e5e7eb", margin:"0 3px" };
 
-  const exportCircuit = () => {
-    const json = JSON.stringify({ components:state.components, wires:state.wires }, null, 2);
-    const a = Object.assign(document.createElement("a"), { href:URL.createObjectURL(new Blob([json],{type:"application/json"})), download:"circuit.json" });
-    a.click();
-  };
-  const importCircuit = () => {
-    const inp = Object.assign(document.createElement("input"), { type:"file", accept:".json" });
-    inp.onchange = (e:Event) => {
-      const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return;
-      const r = new FileReader();
-      r.onload = ev => { try { const d = JSON.parse(ev.target?.result as string) as Circuit; dispatch({ type:"LOAD", components:d.components??[], wires:d.wires??[] }); } catch {} };
-      r.readAsText(file);
-    };
-    inp.click();
+  const handleClear = () => {
+    if (!window.confirm("Êtes-vous sûr de vouloir tout effacer ?")) return;
+    dispatch({ type:"LOAD", components:[], wires:[] });
+    dispatch({ type:"SELECT", ids:[] });
   };
 
   return (
     <div style={{ height:40, background:bg, borderBottom:bdr, display:"flex", alignItems:"center", padding:"0 10px", gap:3, flexShrink:0 }}>
-      <span style={{ fontSize:9.5, letterSpacing:"0.15em", color:dark?"#3a4060":"#9ca3af", fontWeight:700, fontFamily:"monospace", marginRight:6 }}>⚡ CIRCUIT</span>
-      <button style={btn} onClick={() => dispatch({ type:"UNDO" })}>↩ Undo</button>
-      <button style={btn} onClick={() => dispatch({ type:"REDO" })}>↪ Redo</button>
+      <span style={{ fontSize:9.5, letterSpacing:"0.15em", color:dark?"#3a4060":"#9ca3af", fontWeight:700, fontFamily:"monospace", marginRight:6 }}>{UI.appTitle}</span>
+      <button style={btn} onClick={() => dispatch({ type:"UNDO" })}>{UI.undo}</button>
+      <button style={btn} onClick={() => dispatch({ type:"REDO" })}>{UI.redo}</button>
       <div style={sep} />
       <button style={{ ...btn, color:state.showGrid?"#2563eb":undefined }} onClick={() => dispatch({ type:"TOGGLE_GRID" })}>
-        {state.showGrid?"⊞ Grid ✓":"⊞ Grid"}
+        {state.showGrid ? UI.gridOn : UI.gridOff}
       </button>
-      <button style={btn} onClick={() => dispatch({ type:"TOGGLE_DARK" })}>{dark?"☀ Light":"◑ Dark"}</button>
+      <button style={btn} onClick={() => dispatch({ type:"TOGGLE_DARK" })}>{dark ? UI.light : UI.dark}</button>
       <div style={sep} />
-      <button style={btn} onClick={exportCircuit}>↓ Export</button>
-      <button style={btn} onClick={importCircuit}>↑ Import</button>
+      <button style={{ ...btn, color:"#2563eb", fontWeight:600 }} onClick={onShowNetlist}>{UI.netlistBtn}</button>
       <div style={sep} />
-      <button style={{ ...btn, color:"#2563eb", fontWeight:600 }} onClick={onShowNetlist}>∑ Netlist</button>
-      <div style={sep} />
-      <button style={{ ...btn, color:"#dc2626" }} onClick={() => { dispatch({ type:"LOAD",components:[],wires:[] }); dispatch({ type:"SELECT",ids:[] }); }}>✕ Clear</button>
+      <button style={{ ...btn, color:"#dc2626" }} onClick={handleClear}>{UI.clearBtn}</button>
       <div style={{ flex:1 }} />
       <span style={{ fontSize:10, color:dark?"#3a4060":"#9ca3af", fontFamily:"monospace" }}>{Math.round(cam.z*100)}%</span>
     </div>
@@ -1420,16 +1398,294 @@ function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
 function StatusBar({ state }: { state:AppState }) {
   const dark = state.darkMode;
   const tips: Record<ToolMode,string> = {
-    select: "Click to select · Shift+click / drag-box multi-select · R rotate · Del delete · Ctrl+Z/Y undo/redo",
-    wire:   "Click to add vertex · Double-click or ESC to finish · Snaps to terminals",
-    place:  `Click to place ${state.placingType??""} · R to rotate · ESC to cancel`,
+    select: UI.tipSelect,
+    wire:   UI.tipWire,
+    place:  UI.tipPlace(state.placingType ?? ""),
   };
   return (
     <div style={{ height:24, background:dark?"#07090f":"#f3f4f6", borderTop:dark?"1px solid #1e293b":"1px solid #e5e7eb", display:"flex", alignItems:"center", padding:"0 10px", gap:14, fontSize:10, fontFamily:"'JetBrains Mono',monospace", color:dark?"#2a3050":"#9ca3af", flexShrink:0 }}>
       <span>{tips[state.tool]}</span>
       <div style={{ flex:1 }} />
       <span>x:{Math.round(state.mouseWorld.x)} y:{Math.round(state.mouseWorld.y)}</span>
-      <span>{state.components.length} comp · {state.wires.length} wires</span>
+      <span>{state.components.length} comp · {state.wires.length} fils</span>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── GRAPH VIEW ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface GraphViewProps {
+  config: GraphConfig;
+  liveNetlist: Netlist;
+  simNetlist: Netlist | null;
+  simResult: SimResult | null;
+  dark: boolean;
+  onChangeComponent: (name: string | null) => void;
+  onClose: () => void;
+}
+
+type SeriesData =
+  | { kind: "ac"; points: { t: number; v: number }[] }
+  | { kind: "dc"; value: number }
+  | null;
+
+function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeComponent, onClose }: GraphViewProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // use simNetlist for data lookup so node IDs match what the solver used
+  const nc = useMemo(
+    () => simNetlist?.components.find(c => c.name === config.componentName) ?? null,
+    [simNetlist, config.componentName]
+  );
+
+  const series: SeriesData = useMemo(() => {
+    if (!nc || !simResult || simResult.error) return null;
+
+    const voltage = (tp: { nodeVoltages: Record<string, number> }) => {
+      const v1 = nc.n1 === "0" ? 0 : (tp.nodeVoltages[`node${nc.n1}`] ?? 0);
+      const v2 = nc.n2 === "0" ? 0 : (tp.nodeVoltages[`node${nc.n2}`] ?? 0);
+      return v1 - v2;
+    };
+
+    if (simResult.timeSeries && simResult.timeSeries.length > 0) {
+      return { kind: "ac", points: simResult.timeSeries.map(tp => ({ t: tp.time, v: voltage(tp) })) };
+    }
+
+    const v1 = nc.n1 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n1}`] ?? 0);
+    const v2 = nc.n2 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n2}`] ?? 0);
+    return { kind: "dc", value: v1 - v2 };
+  }, [nc, simResult]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const draw = () => {
+      const W = canvas.offsetWidth;
+      const H = canvas.offsetHeight;
+      if (W === 0 || H === 0) return;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width  = W * dpr;
+      canvas.height = H * dpr;
+      const ctx = canvas.getContext("2d")!;
+      ctx.scale(dpr, dpr);
+
+      const bg      = dark ? "#080a12" : "#f9fafb";
+      const textCol = dark ? "#475569" : "#9ca3af";
+      const lineCol = "#2563eb";
+      const gridCol = dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)";
+      const axisCol = dark ? "#1e293b" : "#e5e7eb";
+
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, W, H);
+
+      const mt = 14, mr = 10, mb = 26, ml = 44;
+      const pw = W - ml - mr;
+      const ph = H - mt - mb;
+
+      ctx.font = "9px 'JetBrains Mono', monospace";
+
+      // no data states
+      if (!series || !config.componentName) {
+        ctx.fillStyle = textCol;
+        ctx.textAlign = "center";
+        ctx.fillText(config.componentName ? UI.noData : UI.noCompSel, W / 2, H / 2);
+        return;
+      }
+
+      // DC mode
+      if (series.kind === "dc") {
+        ctx.fillStyle = textCol;
+        ctx.textAlign = "center";
+        ctx.fillText(UI.dcResult(series.value), W / 2, H / 2 - 8);
+        ctx.fillStyle = lineCol;
+        ctx.fillRect(ml, mt + ph / 2 - 1, pw, 2);
+        return;
+      }
+
+      // AC line chart
+      const pts = series.points;
+      const minT = pts[0].t, maxT = pts[pts.length - 1].t;
+      const rawMin = Math.min(...pts.map(p => p.v));
+      const rawMax = Math.max(...pts.map(p => p.v));
+      const range  = rawMax - rawMin || 1;
+      const pad    = range * 0.12;
+      const yMin   = rawMin - pad, yMax = rawMax + pad;
+      const yRange = yMax - yMin;
+
+      const toX = (t: number) => ml + ((t - minT) / (maxT - minT || 1)) * pw;
+      const toY = (v: number) => mt + (1 - (v - yMin) / yRange) * ph;
+
+      // y grid + ticks
+      const yTicks = 4;
+      for (let i = 0; i <= yTicks; i++) {
+        const v = yMin + (yRange * i) / yTicks;
+        const y = toY(v);
+        ctx.strokeStyle = gridCol; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(ml + pw, y); ctx.stroke();
+        ctx.fillStyle = textCol; ctx.textAlign = "right";
+        ctx.fillText(v.toPrecision(3), ml - 4, y + 3);
+      }
+
+      // x ticks
+      const xTicks = 5;
+      for (let i = 0; i <= xTicks; i++) {
+        const t = minT + ((maxT - minT) * i) / xTicks;
+        const x = toX(t);
+        ctx.strokeStyle = gridCol; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(x, mt); ctx.lineTo(x, mt + ph); ctx.stroke();
+        ctx.fillStyle = textCol; ctx.textAlign = "center";
+        ctx.fillText((t * 1000).toPrecision(3) + "ms", x, mt + ph + 14);
+      }
+
+      // axes
+      ctx.strokeStyle = axisCol; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ml, mt); ctx.lineTo(ml, mt + ph);
+      ctx.moveTo(ml, mt + ph); ctx.lineTo(ml + pw, mt + ph);
+      ctx.stroke();
+
+      // data line
+      ctx.strokeStyle = lineCol; ctx.lineWidth = 1.5;
+      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(toX(pts[0].t), toY(pts[0].v));
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(toX(pts[i].t), toY(pts[i].v));
+      ctx.stroke();
+    };
+
+    draw();
+    const ro = new ResizeObserver(draw);
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, [series, dark, config.componentName]);
+
+  const bdr     = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const textCol = dark ? "#94a3b8" : "#374151";
+  const mutCol  = dark ? "#475569" : "#9ca3af";
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", borderRight:bdr, minWidth:200, flex:1, overflow:"hidden" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 6px", borderBottom:bdr, flexShrink:0 }}>
+        <select
+          value={config.componentName ?? ""}
+          onChange={e => onChangeComponent(e.target.value || null)}
+          style={{
+            flex:1, background:dark?"#0f172a":"#f9fafb",
+            border:dark?"1px solid #1e293b":"1px solid #d1d5db",
+            color:textCol, borderRadius:4, fontSize:10,
+            fontFamily:"'JetBrains Mono',monospace", padding:"2px 4px",
+          }}
+        >
+          <option value="">{UI.chooseComp}</option>
+          {liveNetlist.components.map(c => (
+            <option key={c.name} value={c.name}>{fmtNetlistComp(c)}</option>
+          ))}
+        </select>
+        <button
+          onClick={onClose}
+          style={{ background:"transparent", border:"none", color:mutCol, cursor:"pointer", fontSize:14, lineHeight:1, padding:"1px 4px", flexShrink:0 }}
+        >
+          ×
+        </button>
+      </div>
+      <div style={{ flex:1, minHeight:0 }}>
+        <canvas ref={canvasRef} style={{ width:"100%", height:"100%", display:"block" }} />
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── GRAPH PANEL ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface GraphPanelProps {
+  liveNetlist: Netlist;
+  simNetlist: Netlist | null;
+  simResult: SimResult | null;
+  simRunning: boolean;
+  dark: boolean;
+  onSimulate: () => void;
+}
+
+function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSimulate }: GraphPanelProps) {
+  const [graphs, setGraphs] = useState<GraphConfig[]>([{ id: uid(), componentName: null }]);
+  const [open, setOpen] = useState(true);
+
+  const bg     = dark ? "#0e1120" : "#fafafa";
+  const bdr    = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const mutCol = dark ? "#475569" : "#9ca3af";
+
+  const addGraph    = () => setGraphs(prev => [...prev, { id: uid(), componentName: null }]);
+  const removeGraph = (id: string) => setGraphs(prev => prev.length > 1 ? prev.filter(g => g.id !== id) : prev);
+  const updateGraph = (id: string, componentName: string | null) =>
+    setGraphs(prev => prev.map(g => g.id === id ? { ...g, componentName } : g));
+
+  return (
+    <div style={{ flexShrink:0, background:bg, borderTop:bdr }}>
+      {/* header */}
+      <div style={{ height:32, display:"flex", alignItems:"center", padding:"0 10px", gap:8 }}>
+        <span style={{ fontSize:9, fontWeight:700, letterSpacing:"0.12em", color:mutCol, fontFamily:"monospace" }}>
+          📊 {UI.graphTitle}
+        </span>
+        <div style={{ flex:1 }} />
+        {simResult?.error && (
+          <span style={{ fontSize:9, color:"#dc2626", fontFamily:"monospace" }}>
+            {UI.simErrPrefix}{simResult.error}
+          </span>
+        )}
+        <button
+          onClick={onSimulate}
+          disabled={simRunning}
+          style={{
+            fontSize:10, fontFamily:"'JetBrains Mono',monospace",
+            background: simRunning ? "#1e3a5f" : "#1d4ed8",
+            color:"#fff", border:"none", borderRadius:4,
+            padding:"3px 10px", cursor:simRunning ? "default" : "pointer",
+            opacity: simRunning ? 0.7 : 1,
+          }}
+        >
+          {simRunning ? UI.simRunning : UI.simulate}
+        </button>
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{ background:"transparent", border:"none", color:mutCol, cursor:"pointer", fontSize:11, fontFamily:"monospace", padding:"0 4px" }}
+        >
+          {open ? "▼" : "▲"}
+        </button>
+      </div>
+
+      {/* graphs */}
+      {open && (
+        <div style={{ height:160, display:"flex", borderTop:bdr, overflow:"hidden" }}>
+          {graphs.map(g => (
+            <GraphView
+              key={g.id}
+              config={g}
+              liveNetlist={liveNetlist}
+              simNetlist={simNetlist}
+              simResult={simResult}
+              dark={dark}
+              onChangeComponent={name => updateGraph(g.id, name)}
+              onClose={() => removeGraph(g.id)}
+            />
+          ))}
+          <button
+            onClick={addGraph}
+            title="Ajouter un graphique"
+            style={{
+              flexShrink:0, width:36, background:"transparent",
+              border:"none", color:mutCol, cursor:"pointer",
+              fontSize:20, display:"flex", alignItems:"center", justifyContent:"center",
+            }}
+          >
+            {UI.addGraph}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1442,18 +1698,65 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [cam, setCam]     = useState<Camera>({ x:320, y:220, z:1 });
 
-  // Popover state
+  // popover
   const [popoverComp,   setPopoverComp]   = useState<Component|null>(null);
   const [popoverAnchor, setPopoverAnchor] = useState<Vec2|null>(null);
   const [canvasRect,    setCanvasRect]    = useState<DOMRect|null>(null);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
 
+  // netlist modal
   const [showNetlist, setShowNetlist] = useState(false);
+
+  // simulation
+  const workerRef    = useRef<Worker | null>(null);
+  const [simResult,  setSimResult]  = useState<SimResult | null>(null);
+  const [simNetlist, setSimNetlist] = useState<Netlist | null>(null);
+  const [simRunning, setSimRunning] = useState(false);
+
+  const liveNetlist = useMemo(
+    () => generateNetlist({ components: state.components, wires: state.wires }),
+    [state.components, state.wires]
+  );
 
   const dark  = state.darkMode;
   const empty = state.components.length===0 && state.wires.length===0;
 
-  // Track canvas bounding rect
+  // init worker once
+  useEffect(() => {
+    const worker = createSimulationWorker();
+    workerRef.current = worker;
+    worker.onmessage = (e) => {
+      setSimRunning(false);
+      if (e.data?.error) {
+        setSimResult({ error: e.data.error, nodeVoltages: {}, sourceCurrents: {} });
+      } else {
+        setSimResult({
+          nodeVoltages:   e.data.nodeVoltages   ?? {},
+          sourceCurrents: e.data.sourceCurrents ?? {},
+          timeSeries:     e.data.timeSeries,
+        });
+      }
+    };
+    return () => worker.terminate();
+  }, []);
+
+  const handleSimulate = useCallback(() => {
+    const netlist = generateNetlist({ components: state.components, wires: state.wires });
+    setSimNetlist(netlist);
+    if (netlist.components.length === 0) {
+      setSimResult({ error: "Circuit vide", nodeVoltages: {}, sourceCurrents: {} });
+      return;
+    }
+    setSimRunning(true);
+    workerRef.current?.postMessage({
+      type: "simulate",
+      netlist: netlist.components,
+      timeStep: 1e-4,
+      totalTime: 1e-2,
+    });
+  }, [state.components, state.wires]);
+
+  // track canvas bounding rect
   useEffect(() => {
     const el = canvasWrapRef.current; if (!el) return;
     const ro = new ResizeObserver(() => setCanvasRect(el.getBoundingClientRect()));
@@ -1462,7 +1765,7 @@ export default function App() {
     return () => ro.disconnect();
   }, []);
 
-  // Sync popover with selection
+  // sync popover with selection
   useEffect(() => {
     if (state.selection.length === 1) {
       const comp = state.components.find(c => c.id === state.selection[0]);
@@ -1477,7 +1780,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.selection]);
 
-  // Keep anchor in sync when component moves or cam changes
+  // keep anchor in sync on pan/zoom/move
   useEffect(() => {
     if (!popoverComp) return;
     const live = state.components.find(c => c.id === popoverComp.id);
@@ -1513,7 +1816,6 @@ export default function App() {
       <div style={{ display:"flex", flex:1, overflow:"hidden" }}>
         <Palette state={state} dispatch={dispatch} />
 
-        {/* Canvas — no right sidebar */}
         <div ref={canvasWrapRef} style={{ flex:1, position:"relative", overflow:"hidden" }}>
           <CircuitCanvas
             state={state} dispatch={dispatch}
@@ -1525,12 +1827,11 @@ export default function App() {
             <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", textAlign:"center", pointerEvents:"none" }}>
               <div style={{ fontSize:36, opacity:.07 }}>⚡</div>
               <div style={{ fontSize:11, color:dark?"#2a3050":"#9ca3af", fontFamily:"monospace", lineHeight:2.2, marginTop:8 }}>
-                Select a component from the palette<br/>then click on the canvas to place it
+                {UI.emptyHint.split("\n").map((l,i) => <span key={i}>{l}<br/></span>)}
               </div>
             </div>
           )}
 
-          {/* Canvas-anchored property popover */}
           <ComponentPopover
             comp={popoverComp}
             anchorScreen={popoverAnchor}
@@ -1540,6 +1841,15 @@ export default function App() {
           />
         </div>
       </div>
+
+      <GraphPanel
+        liveNetlist={liveNetlist}
+        simNetlist={simNetlist}
+        simResult={simResult}
+        simRunning={simRunning}
+        dark={dark}
+        onSimulate={handleSimulate}
+      />
 
       <StatusBar state={state} />
 
