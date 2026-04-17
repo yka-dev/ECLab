@@ -16,6 +16,9 @@ import {
   DialogFooter,
 } from "~/components/ui/dialog";
 import { MoreVertical, Plus, Search, LogOut } from "lucide-react";
+import { getCookie } from "~/lib/utils";
+import { redirect, useNavigate } from "react-router";
+import { toast } from "sonner";
 
 type Project = {
   id: string;
@@ -23,26 +26,64 @@ type Project = {
   thumbnail: string;
 };
 
-export default function Projects() {
-  const [projects, setProjects] = useState<Project[]>([]);
+export async function loader({ request }: { request: Request }) {
+  const cookieHeader = request.headers.get("Cookie");
+  const session = getCookie(cookieHeader, "eclab_session_id");
+  if (session === null) {
+    return redirect("/projects/guest");
+  }
+
+  const resp = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects`, {
+    method: "GET",
+    headers: request.headers
+  }) 
+
+  if(!resp.ok) {
+    return redirect("/projects/guest")
+  }
+
+  const projects = await resp.json();
+
+
+  return projects ?? [];
+}
+export default function Projects({loaderData}) {
+  const [projects, setProjects] = useState<Project[]>(loaderData);
   const [search, setSearch] = useState("");
   const [openCreate, setOpenCreate] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [loading, setLoading] = useState(false)
+
+
+  const navigate = useNavigate();
 
   const filteredProjects = projects.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
+    p.name.toLowerCase().includes(search.toLowerCase()),
   );
 
   function handleRename(id: string) {
     const newName = prompt("Nouveau nom du projet");
     if (!newName) return;
 
+    fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects/${id}`, {
+      method :"PATCH",
+      credentials: "include",
+      headers: {
+        "Content-Type" : "application/json"
+      },
+      body: JSON.stringify({ name: newName })
+    })
+
     setProjects((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, name: newName } : p))
+      prev.map((p) => (p.id === id ? { ...p, name: newName } : p)),
     );
   }
 
   function handleDelete(id: string) {
+    fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects/${id}`, {
+      method :"DELETE",
+      credentials: "include"
+    })
     setProjects((prev) => prev.filter((p) => p.id !== id));
   }
 
@@ -50,15 +91,32 @@ export default function Projects() {
     const name = newProjectName.trim();
     if (!name) return;
 
-    const project: Project = {
-      id: crypto.randomUUID(),
-      name,
-      thumbnail: "/placeholder.png",
-    };
 
-    setProjects((prev) => [...prev, project]);
-    setNewProjectName("");
-    setOpenCreate(false);
+    setLoading(true)
+    fetch(`${import.meta.env.VITE_API_ENDPOINT}/project`, {
+      method: "POST",
+      credentials: "include",
+      headers : {
+        "Content-Type" : "application/json"
+      },
+      body: JSON.stringify({name})
+    }).then(response => {
+      if (response.ok) {
+        return response.json()
+      } else {
+        toast.error("Echec lors de la création du projet");
+      }
+    })
+    .then(project => {
+      setProjects((prev) => [...prev, project]);
+    })
+    .finally(() => {
+      setLoading(false)
+      setOpenCreate(false)
+      setNewProjectName("");
+    })
+
+
   }
 
   return (
@@ -69,7 +127,20 @@ export default function Projects() {
           <h1 className="text-2xl font-semibold">Projets</h1>
 
           <div className="flex items-center gap-3">
-            <Button variant="outline">
+            <Button
+              variant="outline"
+              onClick={() => {
+                fetch(`${import.meta.env.VITE_API_ENDPOINT}/auth`, {
+                  method: "DELETE",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  credentials: "include",
+                }).then((response) => {
+                  navigate("/login");
+                });
+              }}
+            >
               <LogOut className="mr-2 h-4 w-4" />
               Se déconnecter
             </Button>
@@ -95,8 +166,12 @@ export default function Projects() {
         {/* Vue vide */}
         {projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground">
-            <p className="text-lg font-medium">Vous n'avez encore aucun projet</p>
-            <p className="text-sm">Créez votre premier projet pour commencer.</p>
+            <p className="text-lg font-medium">
+              Vous n’avez encore aucun projet
+            </p>
+            <p className="text-sm">
+              Créez votre premier projet pour commencer.
+            </p>
 
             <Button className="mt-6" onClick={() => setOpenCreate(true)}>
               <Plus className="mr-2 h-4 w-4" />
@@ -107,7 +182,7 @@ export default function Projects() {
           <>
             <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {filteredProjects.map((project) => (
-                <Card key={project.id}>
+                <Card key={project.id} className="cursor-pointer" onClick={() => navigate(`/projects/${project.id}`)}>
                   <CardContent className="p-0">
                     <div className="aspect-video w-full overflow-hidden rounded-t-lg">
                       <img
@@ -118,13 +193,17 @@ export default function Projects() {
                     </div>
 
                     <div className="flex items-center justify-between p-4">
-                      <span className="truncate font-medium">
+                      <span className="truncate font-medium" >
                         {project.name}
                       </span>
 
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button size="icon" variant="ghost" className="h-8 w-8">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                          >
                             <MoreVertical className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
@@ -179,9 +258,7 @@ export default function Projects() {
               Annuler
             </Button>
 
-            <Button onClick={handleCreateProject}>
-              Créer le projet
-            </Button>
+            <Button onClick={handleCreateProject} disabled={loading}>Créer le projet</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,5 +1,9 @@
 import { Matrix } from 'ml-matrix';
 
+/**
+ * Classe abstraite de composant électrique.
+ * Définit les identifiants de nœuds et la méthode stamp() à implémenter par les sous-classes.
+ */
 export abstract class Component {
     id : string
     node1 : number

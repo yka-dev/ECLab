@@ -59,7 +59,7 @@ export function ForgotPasswordForm({
                     id="new-password"
                     type="password"
                     value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
+                    onChange={(e) => {setNewPassword(e.target.value); setLoading(false)}}
                     required
                   />
                 </Field>
@@ -71,7 +71,7 @@ export function ForgotPasswordForm({
                     id="confirm-password"
                     type="password"
                     value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    onChange={(e) => {setConfirmPassword(e.target.value); setLoading(false)}}
                     required
                   />
                 </Field>

@@ -3,6 +3,10 @@ import { Component } from '../element/Component.ts';
 import { VoltageSource } from '../element/VoltageSource.ts';
 
 export class MnaSolver {
+    /**
+     * Assemble et résout le système MNA pour un circuit :
+     * recense les nœuds et sources de tension, construit G et b via stamp() et résout G * x = b.
+     */
     solve(components: Component[]): Matrix {
         const nodeSet = new Set<number>();
         let voltageSources: VoltageSource[] = [];

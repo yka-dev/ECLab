@@ -12,7 +12,7 @@ import { Input } from "~/components/ui/input";
 import logoImage from "/LOGO.png";
 import { useState } from "react";
 import { toast } from "sonner";
-import { redirect } from "react-router";
+import { redirect, useNavigate } from "react-router";
 
 export function SignupForm({
   className,
@@ -23,6 +23,8 @@ export function SignupForm({
   const [retype, setRetype] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const navigate = useNavigate();
 
   const handleSubmit = (e: React.SubmitEvent) => {
     e.preventDefault();
@@ -39,6 +41,7 @@ export function SignupForm({
       headers: {
         "Content-Type": "application/json",
       },
+      credentials: "include",
       body: JSON.stringify({
         email,
         password,
@@ -50,7 +53,7 @@ export function SignupForm({
       } else {
         toast.success("Votre compte ECLab a été créé avec succès");
         setTimeout(() => {
-          redirect("/projects");
+          navigate("/projects")
         }, 1000);
       }
     });
@@ -61,6 +64,52 @@ export function SignupForm({
       <div className="rounded-3xl bg-background">
         <Card className="overflow-hidden rounded-[calc(1.5rem-1px)] border-0 bg-background p-0 shadow-none">
           <CardContent className="grid p-0 md:grid-cols-2">
+          <form className="p-6 md:p-8" onSubmit={handleSubmit}>
+            <FieldGroup>
+              <div className="flex flex-col items-center gap-2 text-center">
+                <h1 className="text-2xl font-bold">Créer votre compte</h1>
+                <p className="text-muted-foreground text-sm text-balance">
+                  Entrez votre e-mail ci-dessous pour créer votre compte ECLab
+                </p>
+              </div>
+              <Field>
+                <FieldLabel htmlFor="email">E-mail</FieldLabel>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="m@example.com"
+                  value={email}
+                  onChange={(e) => {setEmail(e.target.value); setLoading(false)}}
+                  required
+                />
+                <FieldDescription>
+                  Nous l&apos;utiliserons pour vous contacter. Nous ne
+                  partagerons votre e-mail avec personne d&apos;autre.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <Field className="grid grid-cols-2 gap-4">
+                  <Field>
+                    <FieldLabel htmlFor="password">Mot de passe</FieldLabel>
+                    <Input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => {setPassword(e.target.value.trimStart()); setLoading(false)}}
+                      required
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="confirm-password">
+                      Confirmer le mot de passe
+                    </FieldLabel>
+                    <Input
+                      id="confirm-password"
+                      type="password"
+                      value={retype}
+                      onChange={(e) => {setRetype(e.target.value.trimStart()); setLoading(false)}}
+                      required
+                    />
             <form className="p-6 md:p-8" onSubmit={handleSubmit}>
               <FieldGroup>
                 <div className="flex flex-col items-center gap-2 text-center">
