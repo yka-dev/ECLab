@@ -61,6 +61,7 @@ const UI = {
   addGraph:       "+",
   chooseComp:     "Choisir un composant...",
   simulate:       "▶ Simuler",
+  stop:           "■ Arrêter",
   simRunning:     "Simulation...",
   noData:         "Aucune donnée — lancez la simulation",
   noCompSel:      "Sélectionnez un composant",
@@ -1434,10 +1435,10 @@ type SeriesData =
 function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeComponent, onClose }: GraphViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // use simNetlist for data lookup so node IDs match what the solver used
+  // use liveNetlist for node IDs so they stay current as the circuit changes
   const nc = useMemo(
-    () => simNetlist?.components.find(c => c.name === config.componentName) ?? null,
-    [simNetlist, config.componentName]
+    () => liveNetlist.components.find(c => c.name === config.componentName) ?? null,
+    [liveNetlist, config.componentName]
   );
 
   const series: SeriesData = useMemo(() => {
@@ -1609,9 +1610,10 @@ interface GraphPanelProps {
   simRunning: boolean;
   dark: boolean;
   onSimulate: () => void;
+  onStop: () => void;
 }
 
-function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSimulate }: GraphPanelProps) {
+function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSimulate, onStop }: GraphPanelProps) {
   const [graphs, setGraphs] = useState<GraphConfig[]>([{ id: uid(), componentName: null }]);
   const [open, setOpen] = useState(true);
 
@@ -1638,17 +1640,15 @@ function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSi
           </span>
         )}
         <button
-          onClick={onSimulate}
-          disabled={simRunning}
+          onClick={simRunning ? onStop : onSimulate}
           style={{
             fontSize:10, fontFamily:"'JetBrains Mono',monospace",
-            background: simRunning ? "#1e3a5f" : "#1d4ed8",
+            background: simRunning ? "#7f1d1d" : "#1d4ed8",
             color:"#fff", border:"none", borderRadius:4,
-            padding:"3px 10px", cursor:simRunning ? "default" : "pointer",
-            opacity: simRunning ? 0.7 : 1,
+            padding:"3px 10px", cursor:"pointer",
           }}
         >
-          {simRunning ? UI.simRunning : UI.simulate}
+          {simRunning ? UI.stop : UI.simulate}
         </button>
         <button
           onClick={() => setOpen(o => !o)}
@@ -1708,7 +1708,8 @@ export default function App() {
   const [showNetlist, setShowNetlist] = useState(false);
 
   // simulation
-  const workerRef    = useRef<Worker | null>(null);
+  const workerRef        = useRef<Worker | null>(null);
+  const accTimeSeriesRef = useRef<SimPoint[]>([]);
   const [simResult,  setSimResult]  = useState<SimResult | null>(null);
   const [simNetlist, setSimNetlist] = useState<Netlist | null>(null);
   const [simRunning, setSimRunning] = useState(false);
@@ -1726,35 +1727,53 @@ export default function App() {
     const worker = createSimulationWorker();
     workerRef.current = worker;
     worker.onmessage = (e) => {
-      setSimRunning(false);
       if (e.data?.error) {
+        setSimRunning(false);
         setSimResult({ error: e.data.error, nodeVoltages: {}, sourceCurrents: {} });
-      } else {
+        return;
+      }
+      if (e.data?.type === 'chunk') {
+        const newPoints: SimPoint[] = e.data.timeSeries ?? [];
+        if (newPoints.length > 0) {
+          const combined = [...accTimeSeriesRef.current, ...newPoints];
+          // keep last 2 seconds of data at 1ms resolution = 2000 points
+          accTimeSeriesRef.current = combined.length > 2000 ? combined.slice(combined.length - 2000) : combined;
+        }
         setSimResult({
           nodeVoltages:   e.data.nodeVoltages   ?? {},
           sourceCurrents: e.data.sourceCurrents ?? {},
-          timeSeries:     e.data.timeSeries,
+          timeSeries:     accTimeSeriesRef.current.length > 0 ? [...accTimeSeriesRef.current] : undefined,
         });
       }
     };
     return () => worker.terminate();
   }, []);
 
+  // push updated netlist to worker whenever components change during simulation
+  useEffect(() => {
+    if (!simRunning) return;
+    const netlist = generateNetlist({ components: state.components, wires: state.wires });
+    workerRef.current?.postMessage({ type: "updateNetlist", netlist: netlist.components });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.components, state.wires]);
+
   const handleSimulate = useCallback(() => {
     const netlist = generateNetlist({ components: state.components, wires: state.wires });
-    setSimNetlist(netlist);
     if (netlist.components.length === 0) {
       setSimResult({ error: "Circuit vide", nodeVoltages: {}, sourceCurrents: {} });
       return;
     }
+    setSimNetlist(netlist);
+    accTimeSeriesRef.current = [];
+    setSimResult(null);
     setSimRunning(true);
-    workerRef.current?.postMessage({
-      type: "simulate",
-      netlist: netlist.components,
-      timeStep: 1e-4,
-      totalTime: 1e-2,
-    });
+    workerRef.current?.postMessage({ type: "simulate", netlist: netlist.components });
   }, [state.components, state.wires]);
+
+  const handleStop = useCallback(() => {
+    workerRef.current?.postMessage({ type: "stop" });
+    setSimRunning(false);
+  }, []);
 
   // track canvas bounding rect
   useEffect(() => {
@@ -1849,6 +1868,7 @@ export default function App() {
         simRunning={simRunning}
         dark={dark}
         onSimulate={handleSimulate}
+        onStop={handleStop}
       />
 
       <StatusBar state={state} />
