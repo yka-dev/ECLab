@@ -51,9 +51,9 @@ func main() {
 	// Configure le routeur HTTP et CORS
 	router := chi.NewRouter()
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		AllowedOrigins:   []string{Env.URL, "http://localhost:5173", "http://127.0.0.1:5173"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		AllowedHeaders:   []string{"*"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -65,10 +65,9 @@ func main() {
 		Password string `json:"password"`
 	}
 
-	// Route unique pour login/signup/logout (méthodes POST/GET/DELETE selon usage)
-	router.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/auth/*", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case http.MethodPost, http.MethodGet:
+		case http.MethodPost:
 			var request AuthRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				http.Error(w, "Invalid request payload", http.StatusBadRequest)
@@ -105,8 +104,7 @@ func main() {
 				}
 			}
 
-			// Retourne le cookie de session
-			w.Header().Set("Set-Cookie", cookie.String())
+			http.SetCookie(w, cookie)
 			w.WriteHeader(http.StatusOK)
 
 		case http.MethodDelete:
@@ -119,7 +117,7 @@ func main() {
 
 			cookie := logout(r.Context(), session)
 
-			w.Header().Set("Set-Cookie", cookie.String())
+			http.SetCookie(w, cookie)
 			w.WriteHeader(http.StatusOK)
 
 		default:
@@ -268,6 +266,7 @@ func main() {
 	router.Get("/projects", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
+			log.Println(err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -283,7 +282,7 @@ func main() {
 	})
 
 	// Routes pour manipuler un projet par id (GET/DELETE/PATCH)
-	router.HandleFunc("/project/{id}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -351,7 +350,7 @@ func main() {
 	})
 
 	// Mettre à jour le circuit d'un projet
-	router.Post("/project/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
+	router.Post("/projects/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -454,9 +453,11 @@ func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
 	return &http.Cookie{
 		Name:     "eclab_session_id",
 		Value:    value,
-		Expires:  expiresAt,
-		HttpOnly: false,
+		Path:     "/",
+		HttpOnly: true,
 		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		Expires:  expiresAt,
 	}
 }
 
@@ -491,7 +492,7 @@ func validatePassword(password string) (string, error) {
 
 // getSessionFromRequest récupère la session à partir du cookie de la requête et la valide en base.
 func getSessionFromRequest(r *http.Request) (*repositery.Session, error) {
-	cookie, err := r.Cookie("session_id")
+	cookie, err := r.Cookie("eclab_session_id")
 	if err != nil {
 		return nil, fmt.Errorf("session cookie not found")
 	}
