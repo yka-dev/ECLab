@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link } from "react-router";
 import { ChevronDown } from "lucide-react";
 import type { Route } from "./+types/home";
@@ -11,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { electricityConcepts } from "~/lib/electricity-concepts";
+import {createSimulationWorker} from "simulation"
 
 export function meta({}: Route.MetaArgs) {
   return [
