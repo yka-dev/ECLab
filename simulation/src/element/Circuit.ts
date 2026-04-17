@@ -2,6 +2,7 @@ import { Battery } from '../element/Battery';
 import { Capacitor } from '../element/Capacitor';
 import { Component } from '../element/Component';
 import { CurrentSource } from '../element/CurrentSource';
+import { Inductor } from '../element/Inductor';
 import { Led } from '../element/Led';
 import { Resistor } from '../element/Resistor';
 import { Switch } from '../element/Switch';
@@ -90,6 +91,23 @@ export class Circuit {
 const I1   = new CurrentSource("I1", 13, 0, 0.01);
 
         [B1, W1, S1, W2, W3, R1, W4, LED1, W5, W6, C1, W7, C2, W8, I1].forEach(c => circuit.addComponent(c));
+
+        return circuit;
+    }
+
+    // circuit RLC classique — la tension oscille avant de se stabiliser
+    static createRlcCircuit(): Circuit {
+        const circuit = new Circuit();
+
+        const V1 = new VoltageSource("V1", 1, 0, 10);
+        const R1 = new Resistor("R1", 1, 2, 10);
+        const L1 = new Inductor("L1", 2, 3, 0.01);  // 10mH
+        const C1 = new Capacitor("C1", 3, 0, 100e-6); // 100µF
+
+        circuit.addComponent(V1);
+        circuit.addComponent(R1);
+        circuit.addComponent(L1);
+        circuit.addComponent(C1);
 
         return circuit;
     }
