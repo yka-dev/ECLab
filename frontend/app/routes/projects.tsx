@@ -33,7 +33,7 @@ export async function loader({ request }: { request: Request }) {
     return redirect("/projects/guest");
   }
 
-  const resp = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects`, {
+  const resp = await fetch(`/api/projects`, {
     method: "GET",
     headers: request.headers
   }) 
@@ -65,7 +65,7 @@ export default function Projects({loaderData}) {
     const newName = prompt("Nouveau nom du projet");
     if (!newName) return;
 
-    fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects/${id}`, {
+    fetch(`/api/projects/${id}`, {
       method :"PATCH",
       credentials: "include",
       headers: {
@@ -80,7 +80,7 @@ export default function Projects({loaderData}) {
   }
 
   function handleDelete(id: string) {
-    fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects/${id}`, {
+    fetch(`/api/projects/${id}`, {
       method :"DELETE",
       credentials: "include"
     })
@@ -93,7 +93,7 @@ export default function Projects({loaderData}) {
 
 
     setLoading(true)
-    fetch(`${import.meta.env.VITE_API_ENDPOINT}/project`, {
+    fetch(`/api/project`, {
       method: "POST",
       credentials: "include",
       headers : {
@@ -130,7 +130,7 @@ export default function Projects({loaderData}) {
             <Button
               variant="outline"
               onClick={() => {
-                fetch(`${import.meta.env.VITE_API_ENDPOINT}/auth`, {
+                fetch(`/api/auth`, {
                   method: "DELETE",
                   headers: {
                     "Content-Type": "application/json",
