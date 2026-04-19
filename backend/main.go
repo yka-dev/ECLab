@@ -53,7 +53,7 @@ func main() {
 	// Configure le routeur HTTP et CORS
 	router := chi.NewRouter()
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{Env.URL, "http://localhost:5173", "http://127.0.0.1:5173", "http://*", "https://*"},
+		AllowedOrigins:   []string{"http://*", "https://*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"*"},
 		ExposedHeaders:   []string{"Link"},
@@ -457,13 +457,14 @@ func logout(ctx context.Context, session *repositery.Session) *http.Cookie {
 // createAuthCookie génère un cookie de session avec la valeur et la date d'expiration fournies.
 func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name:     "eclab_session_id",
-		Value:    value,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
-		Expires:  expiresAt,
+		Name:        "eclab_session_id",
+		Value:       value,
+		Path:        "/",
+		HttpOnly:    true,
+		Secure:      true,
+		SameSite:    http.SameSiteNoneMode,
+		Expires:     expiresAt,
+		Partitioned: true,
 	}
 }
 
