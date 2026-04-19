@@ -36,7 +36,7 @@ export function SignupForm({
       return;
     }
 
-    fetch(`${import.meta.env.VITE_API_ENDPOINT}/auth/signup`, {
+    fetch(`/api/auth/signup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

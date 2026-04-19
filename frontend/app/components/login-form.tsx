@@ -30,7 +30,7 @@ export function LoginForm({
     setError("");
     setLoading(true);
 
-    fetch(`${import.meta.env.VITE_API_ENDPOINT}/auth/login`, {
+    fetch(`/api/auth/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
