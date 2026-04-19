@@ -1,19 +1,26 @@
 import { Component, StampContext } from './Component';
 
-/**
- * Représente une résistance et ajoute sa contribution (conductance) à la matrice G
- * lors du 'stamp' pour l'analyse nodale modifiée (MNA).
- */
-export class Resistor extends Component {
-    resistance: number;
+// Un switch c'est simplement une résistance qui change de valeur.
+// Fermé  → résistance quasi nulle  → le courant passe librement
+// Ouvert → résistance quasi infinie → plus rien ne passe
+export class Switch extends Component {
+    closed: boolean;
 
-    constructor(id: string, node1: number, node2: number, resistance: number) {
+    constructor(id: string, node1: number, node2: number, closed: boolean = false) {
         super(id, node1, node2);
-        this.resistance = resistance;
+        this.closed = closed;
+    }
+
+    toggle(): void {
+        this.closed = !this.closed;
     }
 
     stamp({ G, nodeIndexMap }: StampContext): void {
-        const g = 1 / this.resistance;
+        // fermé = 0.001 ohm (quasi un fil)
+        // ouvert = 1 000 000 000 ohm (quasi l'air)
+        const resistance = this.closed ? 0.001 : 1e9;
+        const g = 1 / resistance;
+
         const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
         const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
 

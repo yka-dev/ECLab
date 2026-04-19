@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link } from "react-router";
 import { ChevronDown } from "lucide-react";
 import type { Route } from "./+types/home";
@@ -11,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { electricityConcepts } from "~/lib/electricity-concepts";
+import {createSimulationWorker} from "simulation"
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -23,6 +25,23 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Home() {
+   useEffect(() => {
+    const worker = createSimulationWorker();
+
+    worker.onmessage = (event) => {
+      console.log("result from worker:", event.data);
+    };
+
+    worker.onerror = (error) => {
+      console.error("worker error:", error);
+    };
+
+    worker.postMessage({ type: "runTest" });
+
+    return () => {
+      worker.terminate();
+    };
+  }, []);
   return (
     <div className="bg-muted min-h-svh">
       <div className="flex min-h-svh w-full flex-col border border-zinc-200 bg-white">

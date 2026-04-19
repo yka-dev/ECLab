@@ -1,13 +1,12 @@
 import { Component, StampContext } from './Component';
 
-/**
- * Représente une résistance et ajoute sa contribution (conductance) à la matrice G
- * lors du 'stamp' pour l'analyse nodale modifiée (MNA).
- */
-export class Resistor extends Component {
+// Un fil c'est juste une résistance très très faible.
+// En vrai un fil a 0 ohm, mais dans le solver on peut pas diviser par zéro.
+// Donc par défaut on met 0.001 ohm, mais tu peux choisir ta propre valeur.
+export class Wire extends Component {
     resistance: number;
 
-    constructor(id: string, node1: number, node2: number, resistance: number) {
+    constructor(id: string, node1: number, node2: number, resistance: number = 0.001) {
         super(id, node1, node2);
         this.resistance = resistance;
     }
