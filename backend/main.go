@@ -48,10 +48,12 @@ func main() {
 	// Initialise le client email (ex: Brevo)
 	Email = email.New(Env.BREVO_API_KEY)
 
+	log.Println(Env)
+
 	// Configure le routeur HTTP et CORS
 	router := chi.NewRouter()
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   []string{Env.URL, "http://localhost:5173", "http://127.0.0.1:5173"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"*"},
 		ExposedHeaders:   []string{"Link"},
