@@ -457,14 +457,13 @@ func logout(ctx context.Context, session *repositery.Session) *http.Cookie {
 // createAuthCookie génère un cookie de session avec la valeur et la date d'expiration fournies.
 func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name:        "eclab_session_id",
-		Value:       value,
-		Path:        "/",
-		HttpOnly:    true,
-		Secure:      true,
-		SameSite:    http.SameSiteNoneMode,
-		Expires:     expiresAt,
-		Partitioned: true,
+		Name:     "eclab_session_id",
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		Expires:  expiresAt,
 	}
 }
 

@@ -48,7 +48,7 @@ export function SignupForm({
       }),
     }).then((response) => {
       if (!response.ok) {
-        response.text().then((err) => setError(error));
+        response.text().then((err) => setError(err));
         setLoading(false);
       } else {
         toast.success("Votre compte ECLab a été créé avec succès");
