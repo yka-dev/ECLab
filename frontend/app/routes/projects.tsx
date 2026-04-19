@@ -33,7 +33,7 @@ export async function loader({ request }: { request: Request }) {
     return redirect("/projects/guest");
   }
 
-  const resp = await fetch(`/api/projects`, {
+  const resp = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects`, {
     method: "GET",
     headers: request.headers
   }) 
