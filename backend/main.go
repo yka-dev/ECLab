@@ -65,6 +65,10 @@ func main() {
 		Password string `json:"password"`
 	}
 
+	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Tout est marche"))
+	})
+
 	router.HandleFunc("/auth/*", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
