@@ -9,14 +9,12 @@ import {
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { createSimulationWorker } from "simulation";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 const GRID = 24;
 const ZOOM_MIN = 0.12;
 const ZOOM_MAX = 6;
 const THEME_STORAGE_KEY = "circuit-sandbox-theme";
 
-// ─── UI Strings (French) ─────────────────────────────────────────────────────
 
 const UI = {
   appTitle:       "⚡ CIRCUIT",
@@ -69,8 +67,6 @@ const UI = {
   simErrPrefix:   "Erreur : ",
 } as const;
 
-// ─── Core Types ───────────────────────────────────────────────────────────────
-
 export interface Vec2 { x: number; y: number; }
 export interface Terminal { x: number; y: number; }
 
@@ -91,7 +87,6 @@ export interface Component {
 export interface Wire { id: string; points: Vec2[]; }
 export interface Circuit { components: Component[]; wires: Wire[]; }
 
-// ─── Simulation Types ─────────────────────────────────────────────────────────
 
 interface SimPoint {
   time: number;
@@ -110,8 +105,6 @@ interface GraphConfig {
   id: string;
   componentName: string | null;
 }
-
-// ─── Component Property Schema ────────────────────────────────────────────────
 
 type PropFieldType = "number" | "boolean" | "select";
 interface PropFieldBase { label: string; type: PropFieldType; default: unknown; }
@@ -143,7 +136,6 @@ interface BoolPropDef   { key: string; label: string; type: "boolean"; }
 interface SelectPropDef { key: string; label: string; type: "select";  options: string[]; }
 type PropDef = NumberPropDef | BoolPropDef | SelectPropDef;
 
-// ─── Component Definition ─────────────────────────────────────────────────────
 
 interface ComponentDef {
   label: string;
