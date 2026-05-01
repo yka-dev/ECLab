@@ -13,8 +13,12 @@ let latestNetlist: any[] = [];
 let prevSolution: number[] | undefined = undefined;
 let currentTime = 0;
 
-const TIME_STEP  = 1e-3;   // 1 ms par pas
-const CHUNK_STEPS = 20;    // 20 pas par chunk = 20 ms de simulation par envoi
+// ── Paramètres de simulation (physique) ───────────────────────────────────────
+const TIME_STEP   = 1e-4;  // 0.1 ms — précision élevée, stable pour RC avec τ ≥ 0.5 ms
+const CHUNK_STEPS = 8;     // 8 pas par chunk = 0.8 ms de temps simulé par envoi
+const CHUNK_DELAY = 60;    // 60 ms de pause réelle entre chunks → ~13× ralenti vs temps réel
+// Ratio temps réel : (CHUNK_STEPS × TIME_STEP) / (CHUNK_DELAY ms) = 0.8 ms / 60 ms ≈ 0.013×
+// → un transitoire RC de τ = 1 ms se déroule en ~5 s de temps réel (très lisible)
 
 function buildComponents(netlist: any[]): Component[] {
     const out: Component[] = [];
@@ -40,7 +44,7 @@ function runChunk() {
         const components = buildComponents(latestNetlist);
 
         if (components.length === 0) {
-            setTimeout(runChunk, 100);
+            setTimeout(runChunk, CHUNK_DELAY);
             return;
         }
 
@@ -89,7 +93,7 @@ function runChunk() {
             });
         }
 
-        setTimeout(runChunk, 0);
+        setTimeout(runChunk, CHUNK_DELAY);
 
     } catch (err) {
         running = false;
