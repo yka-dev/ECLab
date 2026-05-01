@@ -150,20 +150,6 @@ export function SignupForm({
           </CardContent>
         </Card>
       </div>
-      <FieldDescription className="px-6 text-center">
-        En cliquant sur continuer, vous acceptez nos{" "}
-        <a href="#">Conditions d&apos;utilisation</a> et{" "}
-        <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            alert("vous êtes pas assez important");
-          }}
-        >
-          Politique de confidentialité
-        </a>
-        .
-      </FieldDescription>
     </div>
   );
 }
