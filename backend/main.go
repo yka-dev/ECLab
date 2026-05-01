@@ -424,6 +424,7 @@ func main() {
 func signup(ctx context.Context, email string, password string) (*http.Cookie, error) {
 	hashedPassword, err := hashPassword(password)
 	if err != nil {
+		log.Println(err)
 		return nil, fmt.Errorf("failed to hash password")
 	}
 
@@ -432,11 +433,13 @@ func signup(ctx context.Context, email string, password string) (*http.Cookie, e
 		PasswordHash: hashedPassword,
 	})
 	if err != nil {
+		log.Println(err)
 		return nil, fmt.Errorf("failed to create user")
 	}
 
 	cookie, err := login(ctx, email, password)
 	if err != nil {
+		log.Println(err)
 		return nil, fmt.Errorf("failed to login after registration")
 	}
 
@@ -447,6 +450,7 @@ func signup(ctx context.Context, email string, password string) (*http.Cookie, e
 func login(ctx context.Context, email string, password string) (*http.Cookie, error) {
 	user, err := DB.GetUserByEmail(ctx, email)
 	if err != nil {
+		log.Println(err)
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
@@ -459,6 +463,7 @@ func login(ctx context.Context, email string, password string) (*http.Cookie, er
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	})
 	if err != nil {
+		log.Println(err)
 		return nil, fmt.Errorf("failed to create session")
 	}
 
