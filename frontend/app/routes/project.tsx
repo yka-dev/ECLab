@@ -424,6 +424,8 @@ export interface Netlist {
   nodes: string[];
   components: NetlistComponent[];
   warnings: string[];
+  componentNodes: Map<string, [string, string]>; // compId → [n1, n2]
+  componentNames: Map<string, string>;           // compId → netlist name ("R1", "V2"…)
 }
 
 class UnionFind {
@@ -492,30 +494,27 @@ export function generateNetlist(circuit: Circuit): Netlist {
   const nlComps: NetlistComponent[] = [];
   const counters: Record<string, number> = {};
   const nextName = (prefix: string) => { counters[prefix] = (counters[prefix] ?? 0) + 1; return `${prefix}${counters[prefix]}`; };
+  const componentNodes = new Map<string, [string, string]>();
+  const componentNames = new Map<string, string>();
 
   for (const comp of circuit.components) {
     const tw = termWorlds(comp);
+    const n1 = () => nodeOf(tw[0]);
+    const n2 = () => nodeOf(tw[1]);
+    const reg = (prefix: string, a: string, b: string) => {
+      const name = nextName(prefix);
+      componentNodes.set(comp.id, [a, b]);
+      componentNames.set(comp.id, name);
+      return name;
+    };
     switch (comp.type) {
-      case "resistor":
-        nlComps.push({ type: "R", name: nextName("R"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), value: comp.props.resistance as number });
-        break;
-      case "capacitor":
-        nlComps.push({ type: "C", name: nextName("C"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), value: comp.props.capacitance as number });
-        break;
-      case "inductor":
-        nlComps.push({ type: "L", name: nextName("L"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), value: comp.props.inductance as number });
-        break;
-      case "vsource":
-        nlComps.push({ type: "V", name: nextName("V"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), value: comp.props.voltage as number });
-        break;
-      case "led":
-        nlComps.push({ type: "D", name: nextName("D"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), vf: comp.props.forwardVoltage as number });
-        break;
-      case "switch":
-        nlComps.push({ type: "S", name: nextName("S"), n1: nodeOf(tw[0]), n2: nodeOf(tw[1]), state: comp.props.closed as boolean });
-        break;
-      case "ground":
-        break;
+      case "resistor": { const a=n1(),b=n2(); nlComps.push({ type:"R", name:reg("R",a,b), n1:a, n2:b, value:comp.props.resistance as number }); break; }
+      case "capacitor":{ const a=n1(),b=n2(); nlComps.push({ type:"C", name:reg("C",a,b), n1:a, n2:b, value:comp.props.capacitance as number}); break; }
+      case "inductor": { const a=n1(),b=n2(); nlComps.push({ type:"L", name:reg("L",a,b), n1:a, n2:b, value:comp.props.inductance as number }); break; }
+      case "vsource":  { const a=n1(),b=n2(); nlComps.push({ type:"V", name:reg("V",a,b), n1:a, n2:b, value:comp.props.voltage as number   }); break; }
+      case "led":      { const a=n1(),b=n2(); nlComps.push({ type:"D", name:reg("D",a,b), n1:a, n2:b, vf:comp.props.forwardVoltage as number}); break; }
+      case "switch":   { const a=n1(),b=n2(); nlComps.push({ type:"S", name:reg("S",a,b), n1:a, n2:b, state:comp.props.closed as boolean  }); break; }
+      case "ground": break;
     }
   }
 
@@ -535,7 +534,7 @@ export function generateNetlist(circuit: Circuit): Netlist {
     return (isNaN(na) || isNaN(nb)) ? a.localeCompare(b) : na - nb;
   });
 
-  return { nodes, components: nlComps, warnings };
+  return { nodes, components: nlComps, warnings, componentNodes, componentNames };
 }
 
 export function netlistToString(netlist: Netlist): string {
@@ -1406,6 +1405,312 @@ function StatusBar({ state }: { state:AppState }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ─── COURANT PAR FIL ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface CircuitCurrents {
+  wireCurrents:     Map<string, number>; // wireId  → ampères signés
+  componentCurrents: Map<string, number>; // compId  → ampères signés
+}
+
+function computeCircuitCurrents(
+  circuit: Circuit,
+  liveNetlist: Netlist,
+  simResult: SimResult,
+): CircuitCurrents {
+  const { componentNodes, componentNames } = liveNetlist;
+
+  // ── Courant par composant ──────────────────────────────────────────────────────
+  const componentCurrents = new Map<string, number>();
+  for (const comp of circuit.components) {
+    const nodes = componentNodes.get(comp.id);
+    if (!nodes) continue;
+    const [n1, n2] = nodes;
+    const v1 = n1 === "0" ? 0 : (simResult.nodeVoltages[`node${n1}`] ?? 0);
+    const v2 = n2 === "0" ? 0 : (simResult.nodeVoltages[`node${n2}`] ?? 0);
+    let I = 0;
+    switch (comp.type) {
+      case "resistor": I = (v1 - v2) / ((comp.props.resistance as number) || 1); break;
+      case "switch":   I = (comp.props.closed as boolean) ? (v1 - v2) / 0.001 : 0; break;
+      case "vsource":
+      case "led": {
+        const name = componentNames.get(comp.id);
+        I = name ? -(simResult.sourceCurrents[name] ?? 0) : 0;
+        break;
+      }
+      default: I = 0;
+    }
+    componentCurrents.set(comp.id, I);
+  }
+
+  // ── Passe 1 : fils touchant une borne de composant ────────────────────────────
+  const wireCurrents = new Map<string, number>();
+  for (const wire of circuit.wires) {
+    const found: number[] = [];
+    for (const comp of circuit.components) {
+      const touches = termWorlds(comp).some(tw =>
+        wire.points.some(wp => dist(tw, wp) < GRID * 0.6)
+      );
+      if (touches) {
+        const c = componentCurrents.get(comp.id) ?? 0;
+        if (Math.abs(c) > 1e-9) found.push(c);
+      }
+    }
+    wireCurrents.set(
+      wire.id,
+      found.length > 0 ? found.reduce((a, b) => Math.abs(a) >= Math.abs(b) ? a : b, 0) : 0,
+    );
+  }
+
+  // ── Passe 2 : propagation BFS aux fils intermédiaires ─────────────────────────
+  const wireById = new Map(circuit.wires.map(w => [w.id, w]));
+  const seeded   = new Set<string>();
+  for (const [id, c] of wireCurrents) { if (Math.abs(c) > 1e-9) seeded.add(id); }
+  const queue = Array.from(seeded);
+  for (let i = 0; i < queue.length; i++) {
+    const wire = wireById.get(queue[i]); if (!wire) continue;
+    const current = wireCurrents.get(wire.id)!;
+    for (const other of circuit.wires) {
+      if (seeded.has(other.id)) continue;
+      const connected = wire.points.some(p => other.points.some(q => dist(p, q) < GRID * 0.6));
+      if (connected) {
+        wireCurrents.set(other.id, current);
+        seeded.add(other.id);
+        queue.push(other.id);
+      }
+    }
+  }
+
+  return { wireCurrents, componentCurrents };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── OVERLAY ANIMATION COURANT ───────────────────────────────────────────────
+// ── Paramètres visuels des particules (indépendants de la physique) ───────────
+const DOT_SPEED_SCALE = 30000; // px/s par ampère  — augmenter pour accélérer les dots
+const DOT_MIN_SPEED   = 45;    // px/s minimum (même pour très faible courant)
+const DOT_MAX_SPEED   = 320;   // px/s maximum (évite les dots trop rapides)
+const DOT_RADIUS      = 4;     // rayon en pixels
+const DOT_GLOW        = 8;     // shadowBlur
+const DOT_SPACING     = 32;    // distance minimale px entre deux dots sur le même fil
+const DOT_THRESHOLD   = 3e-4;  // ampères en dessous duquel les dots disparaissent
+
+// Couleurs RGB des LEDs pour le glow
+const LED_RGB: Record<string, [number,number,number]> = {
+  red:    [255,  50,  50],
+  green:  [ 50, 255,  80],
+  blue:   [ 50, 140, 255],
+  yellow: [255, 230,  40],
+  white:  [255, 255, 255],
+};
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface AnimDot  { pos: number; }
+interface AnimSeg  { len: number; ax: number; ay: number; bx: number; by: number; }
+interface AnimPath { id: string; segs: AnimSeg[]; totalLen: number; current: number; }
+
+// Construit les segments écran d'un chemin à partir de points monde
+function buildSegs(worldPts: Vec2[], cam: Camera): { segs: AnimSeg[]; totalLen: number } {
+  const segs: AnimSeg[] = [];
+  let totalLen = 0;
+  for (let i = 0; i < worldPts.length - 1; i++) {
+    const a = w2s(worldPts[i].x, worldPts[i].y, cam);
+    const b = w2s(worldPts[i+1].x, worldPts[i+1].y, cam);
+    const len = dist(a, b);
+    if (len > 0.5) segs.push({ len, ax: a.x, ay: a.y, bx: b.x, by: b.y });
+    totalLen += len;
+  }
+  return { segs, totalLen };
+}
+
+// Pré-remplit un chemin de dots uniformément espacés — "tout d'un coup"
+function prefillDots(totalLen: number, spacing: number): AnimDot[] {
+  const count = Math.max(2, Math.ceil(totalLen / spacing));
+  return Array.from({ length: count }, (_, i) => ({ pos: (i / count) * totalLen }));
+}
+
+interface CurrentOverlayProps {
+  wires:             Wire[];
+  components:        Component[];
+  wireCurrents:      Map<string, number>;
+  componentCurrents: Map<string, number>;
+  cam:               Camera;
+  active:            boolean;
+}
+
+function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, cam, active }: CurrentOverlayProps) {
+  const canvasRef  = useRef<HTMLCanvasElement>(null);
+  const rafRef     = useRef<number>(0);
+  const lastTsRef  = useRef<number>(0);
+  const dotsRef    = useRef<Map<string, AnimDot[]>>(new Map());
+
+  // refs toujours frais — pas besoin de relancer le RAF à chaque mise à jour
+  const wiresRef              = useRef(wires);
+  const componentsRef         = useRef(components);
+  const wireCurrentsRef       = useRef(wireCurrents);
+  const componentCurrentsRef  = useRef(componentCurrents);
+  const camRef                = useRef(cam);
+  wiresRef.current             = wires;
+  componentsRef.current        = components;
+  wireCurrentsRef.current      = wireCurrents;
+  componentCurrentsRef.current = componentCurrents;
+  camRef.current               = cam;
+
+  // resize canvas
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const resize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width  = canvas.offsetWidth  * dpr;
+      canvas.height = canvas.offsetHeight * dpr;
+    };
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas); resize();
+    return () => ro.disconnect();
+  }, []);
+
+  // boucle RAF — démarre/arrête selon active
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    cancelAnimationFrame(rafRef.current);
+
+    if (!active) {
+      dotsRef.current.clear();
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
+    lastTsRef.current = 0;
+
+    const animate = (ts: number) => {
+      const dt = Math.min((ts - (lastTsRef.current || ts)) / 1000, 0.05);
+      lastTsRef.current = ts;
+
+      const ctx = canvas.getContext("2d"); if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save(); ctx.scale(dpr, dpr);
+
+      const cam  = camRef.current;
+
+      // ── glow LED ─────────────────────────────────────────────────────────────
+      for (const comp of componentsRef.current) {
+        if (comp.type !== "led") continue;
+        const I = componentCurrentsRef.current.get(comp.id) ?? 0;
+        if (Math.abs(I) < DOT_THRESHOLD) continue;
+
+        const [r, g, b] = LED_RGB[(comp.props.color as string) ?? "red"] ?? LED_RGB.red;
+        const center    = w2s(comp.position.x, comp.position.y, cam);
+        const radius    = GRID * 3.8 * cam.z;
+
+        // pulse lent : oscille entre 0.55 et 1.0 à ~1.4 Hz
+        const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(ts * 0.009));
+
+        // halo ambiant large
+        const halo = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, radius);
+        halo.addColorStop(0,   `rgba(${r},${g},${b},${(pulse * 0.75).toFixed(2)})`);
+        halo.addColorStop(0.35,`rgba(${r},${g},${b},${(pulse * 0.35).toFixed(2)})`);
+        halo.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // point brillant central
+        const core = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, GRID * 0.8 * cam.z);
+        core.addColorStop(0, `rgba(255,255,255,${(pulse * 0.9).toFixed(2)})`);
+        core.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        ctx.fillStyle = core;
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, GRID * 0.8 * cam.z, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // ── construire tous les chemins (fils + composants) ─────────────────────
+      const paths: AnimPath[] = [];
+
+      for (const wire of wiresRef.current) {
+        if (wire.points.length < 2) continue;
+        const I = wireCurrentsRef.current.get(wire.id) ?? 0;
+        const { segs, totalLen } = buildSegs(wire.points, cam);
+        if (totalLen > 1) paths.push({ id: wire.id, segs, totalLen, current: I });
+      }
+
+      for (const comp of componentsRef.current) {
+        if (comp.type === "ground") continue;
+        const I = componentCurrentsRef.current.get(comp.id) ?? 0;
+        const tws = termWorlds(comp);
+        if (tws.length < 2) continue;
+        const { segs, totalLen } = buildSegs(tws, cam);
+        if (totalLen > 1) paths.push({ id: `comp_${comp.id}`, segs, totalLen, current: I });
+      }
+
+      // ── animer chaque chemin ─────────────────────────────────────────────────
+      ctx.shadowColor = "#fbbf24";
+      ctx.shadowBlur  = DOT_GLOW;
+      ctx.fillStyle   = "#fde68a";
+
+      for (const path of paths) {
+        const { id, segs, totalLen, current: I } = path;
+
+        if (Math.abs(I) < DOT_THRESHOLD) {
+          dotsRef.current.delete(id);
+          continue;
+        }
+
+        const absSpeed = Math.min(Math.max(Math.abs(I) * DOT_SPEED_SCALE, DOT_MIN_SPEED), DOT_MAX_SPEED);
+        const speed    = Math.sign(I) * absSpeed;
+        const spacing  = Math.max(DOT_SPACING, totalLen / 6);
+
+        // pré-remplir immédiatement si ce chemin est nouveau
+        let dots = dotsRef.current.get(id);
+        if (!dots) dots = prefillDots(totalLen, spacing);
+
+        // avancer et faire boucler les dots (wrap circulaire)
+        dots = dots.map(d => {
+          let p = d.pos + speed * dt;
+          if (p > totalLen) p -= totalLen;
+          if (p < 0)        p += totalLen;
+          return { pos: p };
+        });
+
+        dotsRef.current.set(id, dots);
+
+        // dessiner
+        for (const dot of dots) {
+          let rem = dot.pos;
+          for (const seg of segs) {
+            if (rem <= seg.len) {
+              const t = rem / seg.len;
+              ctx.beginPath();
+              ctx.arc(seg.ax + (seg.bx - seg.ax) * t, seg.ay + (seg.by - seg.ay) * t, DOT_RADIUS, 0, Math.PI * 2);
+              ctx.fill();
+              break;
+            }
+            rem -= seg.len;
+          }
+        }
+      }
+
+      ctx.shadowBlur = 0;
+      ctx.restore();
+      rafRef.current = requestAnimationFrame(animate);
+    };
+
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [active]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ position:"absolute", inset:0, width:"100%", height:"100%", pointerEvents:"none" }}
+    />
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── GRAPH VIEW ──────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1711,6 +2016,13 @@ export default function App() {
     [state.components, state.wires]
   );
 
+  const { wireCurrents, componentCurrents } = useMemo(
+    () => simResult && !simResult.error
+      ? computeCircuitCurrents({ components: state.components, wires: state.wires }, liveNetlist, simResult)
+      : { wireCurrents: new Map<string, number>(), componentCurrents: new Map<string, number>() },
+    [simResult, state.components, state.wires, liveNetlist]
+  );
+
   const dark  = state.darkMode;
   const empty = state.components.length===0 && state.wires.length===0;
 
@@ -1832,6 +2144,14 @@ export default function App() {
             state={state} dispatch={dispatch}
             cam={cam} setCam={setCam}
             onComponentClick={handleComponentClick}
+          />
+          <CurrentOverlay
+            wires={state.wires}
+            components={state.components}
+            wireCurrents={wireCurrents}
+            componentCurrents={componentCurrents}
+            cam={cam}
+            active={simRunning}
           />
 
           {empty && (
