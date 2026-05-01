@@ -71,70 +71,64 @@ func main() {
 		w.Write([]byte("Tout est marche"))
 	})
 
-	router.HandleFunc("/auth/*", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
-			var request AuthRequest
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-				log.Printf("Failed to decode auth request body: %s\n", err)
-				http.Error(w, "Invalid request payload", http.StatusBadRequest)
-				return
-			}
-
-			// Validation et normalisation de l'email
-			email, err := validateEmail(request.Email)
-			if err != nil {
-				log.Printf("Invalid email address %q: %s\n", request.Email, err)
-				http.Error(w, "Invalid email address", http.StatusBadRequest)
-				return
-			}
-
-			// Validation du mot de passe (longueur minimale)
-			password, err := validatePassword(request.Password)
-			if err != nil {
-				log.Printf("Invalid password: %s\n", err)
-				http.Error(w, "Invalid password", http.StatusBadRequest)
-				return
-			}
-
-			cookie := &http.Cookie{}
-			// Détermine l'action selon le chemin (login vs signup)
-			if strings.Contains(r.URL.Path, "login") {
-				cookie, err = login(r.Context(), email, password)
-				if err != nil {
-					log.Printf("Login failed for %q: %s\n", email, err)
-					http.Error(w, "Invalid credentials", http.StatusInternalServerError)
-					return
-				}
-			} else if strings.Contains(r.URL.Path, "signup") {
-				cookie, err = signup(r.Context(), email, password)
-				if err != nil {
-					log.Printf("Signup failed for %q: %s\n", email, err)
-					http.Error(w, "Failed to signup", http.StatusUnauthorized)
-					return
-				}
-			}
-
-			http.SetCookie(w, cookie)
-			w.WriteHeader(http.StatusOK)
-
-		case http.MethodDelete:
-			// Déconnexion : récupère la session et la supprime
-			session, err := getSessionFromRequest(r)
-			if err != nil {
-				log.Printf("Logout failed, invalid session: %s\n", err)
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			cookie := logout(r.Context(), session)
-
-			http.SetCookie(w, cookie)
-			w.WriteHeader(http.StatusOK)
-
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	router.Delete("/auth", func(w http.ResponseWriter, r *http.Request) {
+		session, err := getSessionFromRequest(r)
+		if err != nil {
+			log.Printf("Logout failed, invalid session: %s\n", err)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
 		}
+
+		cookie := logout(r.Context(), session)
+
+		http.SetCookie(w, cookie)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	router.Post("/auth/*", func(w http.ResponseWriter, r *http.Request) {
+		var request AuthRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			log.Printf("Failed to decode auth request body: %s\n", err)
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Validation et normalisation de l'email
+		email, err := validateEmail(request.Email)
+		if err != nil {
+			log.Printf("Invalid email address %q: %s\n", request.Email, err)
+			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			return
+		}
+
+		// Validation du mot de passe (longueur minimale)
+		password, err := validatePassword(request.Password)
+		if err != nil {
+			log.Printf("Invalid password: %s\n", err)
+			http.Error(w, "Invalid password", http.StatusBadRequest)
+			return
+		}
+
+		cookie := &http.Cookie{}
+		// Détermine l'action selon le chemin (login vs signup)
+		if strings.Contains(r.URL.Path, "login") {
+			cookie, err = login(r.Context(), email, password)
+			if err != nil {
+				log.Printf("Login failed for %q: %s\n", email, err)
+				http.Error(w, "Invalid credentials", http.StatusInternalServerError)
+				return
+			}
+		} else if strings.Contains(r.URL.Path, "signup") {
+			cookie, err = signup(r.Context(), email, password)
+			if err != nil {
+				log.Printf("Signup failed for %q: %s\n", email, err)
+				http.Error(w, "Failed to signup", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		http.SetCookie(w, cookie)
+		w.WriteHeader(http.StatusOK)
 	})
 
 	// Route pour demander un email de réinitialisation (forgot password)
