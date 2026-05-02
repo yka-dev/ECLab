@@ -3372,6 +3372,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     circuit.wires = project.circuit.wires ?? [];
   }
 
+  console.log(project);
+  console.log(circuit);
+
   return {
     id: params.id,
     components: circuit.components,
