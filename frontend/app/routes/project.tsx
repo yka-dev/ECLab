@@ -8,71 +8,88 @@ import {
 } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { createSimulationWorker } from "simulation";
-
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+import { getCookie } from "~/lib/utils";
+import { useLoaderData } from "react-router";
 
 const GRID = 24;
 const ZOOM_MIN = 0.12;
 const ZOOM_MAX = 6;
 const THEME_STORAGE_KEY = "circuit-sandbox-theme";
 
-
 const UI = {
-  appTitle:       "⚡ CIRCUIT",
-  sandboxTitle:   "⚡ CIRCUIT SANDBOX",
-  toolsHeader:    "OUTILS",
-  select:         "Sélection",
-  wire:           "Fil",
-  passive:        "PASSIFS",
-  sources:        "SOURCES",
-  active:         "ACTIFS",
+  appTitle: "⚡ CIRCUIT",
+  sandboxTitle: "⚡ CIRCUIT SANDBOX",
+  toolsHeader: "OUTILS",
+  select: "Sélection",
+  wire: "Fil",
+  passive: "PASSIFS",
+  sources: "SOURCES",
+  active: "ACTIFS",
 
-  undo:           "↩ Annuler",
-  redo:           "↪ Rétablir",
-  gridOff:        "⊞ Grille",
-  gridOn:         "⊞ Grille ✓",
-  light:          "☀ Clair",
-  dark:           "◑ Sombre",
-  netlistBtn:     "∑ Netlist",
-  clearBtn:       "✕ Effacer",
+  undo: "↩ Annuler",
+  redo: "↪ Rétablir",
+  gridOff: "⊞ Grille",
+  gridOn: "⊞ Grille ✓",
+  light: "☀ Clair",
+  dark: "◑ Sombre",
+  netlistBtn: "∑ Netlist",
+  clearBtn: "✕ Effacer",
 
-  tipSelect:      "Cliquer pour sélectionner · Shift+clic / glisser multi-sélect · R rotation · Suppr · Ctrl+Z/Y annuler/rétablir",
-  tipWire:        "Cliquer pour ajouter un point · Double-clic ou ESC pour terminer · Accrochage aux bornes",
-  tipPlace:       (t: string) => `Cliquer pour placer ${t} · R rotation · ESC pour annuler`,
+  tipSelect:
+    "Cliquer pour sélectionner · Shift+clic / glisser multi-sélect · R rotation · Suppr · Ctrl+Z/Y annuler/rétablir",
+  tipWire:
+    "Cliquer pour ajouter un point · Double-clic ou ESC pour terminer · Accrochage aux bornes",
+  tipPlace: (t: string) =>
+    `Cliquer pour placer ${t} · R rotation · ESC pour annuler`,
 
-  noProps:        "Aucune propriété configurable.",
-  closed:         "Fermé",
-  open:           "Ouvert",
-  rotate:         "↻ Rotation 90°",
-  deleteComp:     "✕ Supprimer",
+  noProps: "Aucune propriété configurable.",
+  closed: "Fermé",
+  open: "Ouvert",
+  rotate: "↻ Rotation 90°",
+  deleteComp: "✕ Supprimer",
 
-  netlistTitle:   "Netlist",
-  warnings:       (n: number) => `${n} avertissement${n > 1 ? "s" : ""}`,
-  copy:           "Copier",
-  copied:         "✓ Copié",
-  nodes:          "Nœuds :",
-  elements:       "Éléments :",
-  emptyCircuit:   "* Circuit vide",
+  netlistTitle: "Netlist",
+  warnings: (n: number) => `${n} avertissement${n > 1 ? "s" : ""}`,
+  copy: "Copier",
+  copied: "✓ Copié",
+  nodes: "Nœuds :",
+  elements: "Éléments :",
+  emptyCircuit: "* Circuit vide",
 
-  emptyHint:      "Sélectionnez un composant dans la palette\npuis cliquez sur la toile pour le placer",
+  emptyHint:
+    "Sélectionnez un composant dans la palette\npuis cliquez sur la toile pour le placer",
 
-  graphTitle:     "GRAPHIQUES",
-  addGraph:       "+",
-  chooseComp:     "Choisir un composant...",
-  simulate:       "▶ Simuler",
-  stop:           "■ Arrêter",
-  simRunning:     "Simulation...",
-  noData:         "Aucune donnée — lancez la simulation",
-  noCompSel:      "Sélectionnez un composant",
-  dcResult:       (v: number) => `Régime continu : ${v.toPrecision(4)} V`,
-  simErrPrefix:   "Erreur : ",
+  graphTitle: "GRAPHIQUES",
+  addGraph: "+",
+  chooseComp: "Choisir un composant...",
+  simulate: "▶ Simuler",
+  stop: "■ Arrêter",
+  simRunning: "Simulation...",
+  noData: "Aucune donnée — lancez la simulation",
+  noCompSel: "Sélectionnez un composant",
+  dcResult: (v: number) => `Régime continu : ${v.toPrecision(4)} V`,
+  simErrPrefix: "Erreur : ",
 } as const;
 
-export interface Vec2 { x: number; y: number; }
-export interface Terminal { x: number; y: number; }
+export interface Vec2 {
+  x: number;
+  y: number;
+}
+export interface Terminal {
+  x: number;
+  y: number;
+}
 
 export type ComponentType =
-  | "resistor" | "capacitor" | "inductor"
-  | "vsource"  | "ground"   | "switch"  | "led";
+  | "resistor"
+  | "capacitor"
+  | "inductor"
+  | "vsource"
+  | "ground"
+  | "switch"
+  | "led";
 
 export type Rotation = 0 | 90 | 180 | 270;
 
@@ -84,9 +101,14 @@ export interface Component {
   props: Record<string, unknown>;
 }
 
-export interface Wire { id: string; points: Vec2[]; }
-export interface Circuit { components: Component[]; wires: Wire[]; }
-
+export interface Wire {
+  id: string;
+  points: Vec2[];
+}
+export interface Circuit {
+  components: Component[];
+  wires: Wire[];
+}
 
 interface SimPoint {
   time: number;
@@ -107,35 +129,104 @@ interface GraphConfig {
 }
 
 type PropFieldType = "number" | "boolean" | "select";
-interface PropFieldBase { label: string; type: PropFieldType; default: unknown; }
-interface NumberField extends PropFieldBase { type: "number"; default: number; min?: number; step?: number; }
-interface BoolField   extends PropFieldBase { type: "boolean"; default: boolean; }
-interface SelectField extends PropFieldBase { type: "select";  default: string;  options: string[]; }
+interface PropFieldBase {
+  label: string;
+  type: PropFieldType;
+  default: unknown;
+}
+interface NumberField extends PropFieldBase {
+  type: "number";
+  default: number;
+  min?: number;
+  step?: number;
+}
+interface BoolField extends PropFieldBase {
+  type: "boolean";
+  default: boolean;
+}
+interface SelectField extends PropFieldBase {
+  type: "select";
+  default: string;
+  options: string[];
+}
 type PropField = NumberField | BoolField | SelectField;
 type ComponentPropertySchema = Record<string, PropField>;
 
 const PROP_SCHEMAS: Record<ComponentType, ComponentPropertySchema> = {
-  resistor:  { resistance:    { label: "Résistance (Ω)",       type: "number",  default: 1000,  min: 0, step: 100 } },
-  capacitor: { capacitance:   { label: "Capacité (F)",          type: "number",  default: 1e-6,  min: 0 } },
-  inductor:  { inductance:    { label: "Inductance (H)",         type: "number",  default: 1e-3,  min: 0 } },
-  vsource:   { voltage:       { label: "Tension (V)",            type: "number",  default: 5,     step: 0.5 } },
-  ground:    {},
-  switch:    { closed:        { label: "Fermé",                  type: "boolean", default: false } },
+  resistor: {
+    resistance: {
+      label: "Résistance (Ω)",
+      type: "number",
+      default: 1000,
+      min: 0,
+      step: 100,
+    },
+  },
+  capacitor: {
+    capacitance: {
+      label: "Capacité (F)",
+      type: "number",
+      default: 1e-6,
+      min: 0,
+    },
+  },
+  inductor: {
+    inductance: {
+      label: "Inductance (H)",
+      type: "number",
+      default: 1e-3,
+      min: 0,
+    },
+  },
+  vsource: {
+    voltage: { label: "Tension (V)", type: "number", default: 5, step: 0.5 },
+  },
+  ground: {},
+  switch: { closed: { label: "Fermé", type: "boolean", default: false } },
   led: {
-    color:          { label: "Couleur LED",          type: "select",  default: "red", options: ["red","green","blue","yellow","white"] },
-    forwardVoltage: { label: "Tension seuil Vf (V)", type: "number",  default: 2.0,   min: 0, step: 0.1 },
+    color: {
+      label: "Couleur LED",
+      type: "select",
+      default: "red",
+      options: ["red", "green", "blue", "yellow", "white"],
+    },
+    forwardVoltage: {
+      label: "Tension seuil Vf (V)",
+      type: "number",
+      default: 2.0,
+      min: 0,
+      step: 0.1,
+    },
   },
 };
 
-function defaultPropsFromSchema(schema: ComponentPropertySchema): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(schema).map(([k, f]) => [k, f.default]));
+function defaultPropsFromSchema(
+  schema: ComponentPropertySchema,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(schema).map(([k, f]) => [k, f.default]),
+  );
 }
 
-interface NumberPropDef { key: string; label: string; type: "number"; min?: number; step?: number; }
-interface BoolPropDef   { key: string; label: string; type: "boolean"; }
-interface SelectPropDef { key: string; label: string; type: "select";  options: string[]; }
+interface NumberPropDef {
+  key: string;
+  label: string;
+  type: "number";
+  min?: number;
+  step?: number;
+}
+interface BoolPropDef {
+  key: string;
+  label: string;
+  type: "boolean";
+}
+interface SelectPropDef {
+  key: string;
+  label: string;
+  type: "select";
+  options: string[];
+}
 type PropDef = NumberPropDef | BoolPropDef | SelectPropDef;
-
 
 interface ComponentDef {
   label: string;
@@ -144,40 +235,47 @@ interface ComponentDef {
   terminals: Terminal[];
   defaultProps: Record<string, unknown>;
   propDefs: PropDef[];
-  draw: (ctx: CanvasRenderingContext2D, comp: Component, selected: boolean, hovered: boolean) => void;
+  draw: (
+    ctx: CanvasRenderingContext2D,
+    comp: Component,
+    selected: boolean,
+    hovered: boolean,
+  ) => void;
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-const snap    = (v: number): number => Math.round(v / GRID) * GRID;
-const snapVec = (v: Vec2): Vec2    => ({ x: snap(v.x), y: snap(v.y) });
-const dist    = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
-const uid     = (): string => Math.random().toString(36).slice(2, 9);
+const snap = (v: number): number => Math.round(v / GRID) * GRID;
+const snapVec = (v: Vec2): Vec2 => ({ x: snap(v.x), y: snap(v.y) });
+const dist = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
+const uid = (): string => Math.random().toString(36).slice(2, 9);
 
 const s2w = (sx: number, sy: number, cam: Camera): Vec2 => ({
-  x: (sx - cam.x) / cam.z, y: (sy - cam.y) / cam.z,
+  x: (sx - cam.x) / cam.z,
+  y: (sy - cam.y) / cam.z,
 });
 const w2s = (wx: number, wy: number, cam: Camera): Vec2 => ({
-  x: wx * cam.z + cam.x, y: wy * cam.z + cam.y,
+  x: wx * cam.z + cam.x,
+  y: wy * cam.z + cam.y,
 });
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
 function fmtOhm(v: number): string {
-  if (v >= 1e6) return `${+(v/1e6).toPrecision(3)}MΩ`;
-  if (v >= 1e3) return `${+(v/1e3).toPrecision(3)}kΩ`;
+  if (v >= 1e6) return `${+(v / 1e6).toPrecision(3)}MΩ`;
+  if (v >= 1e3) return `${+(v / 1e3).toPrecision(3)}kΩ`;
   return `${+v.toPrecision(3)}Ω`;
 }
 function fmtFarad(v: number): string {
-  if (v >= 1)    return `${+v.toPrecision(3)}F`;
-  if (v >= 1e-3) return `${+(v*1e3).toPrecision(3)}mF`;
-  if (v >= 1e-6) return `${+(v*1e6).toPrecision(3)}μF`;
-  return `${+(v*1e9).toPrecision(3)}nF`;
+  if (v >= 1) return `${+v.toPrecision(3)}F`;
+  if (v >= 1e-3) return `${+(v * 1e3).toPrecision(3)}mF`;
+  if (v >= 1e-6) return `${+(v * 1e6).toPrecision(3)}μF`;
+  return `${+(v * 1e9).toPrecision(3)}nF`;
 }
 function fmtHenry(v: number): string {
-  if (v >= 1)    return `${+v.toPrecision(3)}H`;
-  if (v >= 1e-3) return `${+(v*1e3).toPrecision(3)}mH`;
-  return `${+(v*1e6).toPrecision(3)}μH`;
+  if (v >= 1) return `${+v.toPrecision(3)}H`;
+  if (v >= 1e-3) return `${+(v * 1e3).toPrecision(3)}mH`;
+  return `${+(v * 1e6).toPrecision(3)}μH`;
 }
 
 const colSel = "#2563eb";
@@ -186,149 +284,291 @@ const colHov = "#7c3aed";
 // ─── Component Definitions ────────────────────────────────────────────────────
 
 const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
-
   resistor: {
-    label: "Résistance", symbol: "R", color: "#92400e",
-    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    label: "Résistance",
+    symbol: "R",
+    color: "#92400e",
+    terminals: [
+      { x: -2, y: 0 },
+      { x: 2, y: 0 },
+    ],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.resistor),
-    propDefs: [{ key:"resistance", label:"Résistance (Ω)", type:"number", min:0, step:100 }],
+    propDefs: [
+      {
+        key: "resistance",
+        label: "Résistance (Ω)",
+        type: "number",
+        min: 0,
+        step: 100,
+      },
+    ],
     draw(ctx, comp, sel, hov) {
-      const w = GRID*1.35, h = GRID*0.5, col = sel ? colSel : hov ? colHov : "#92400e";
-      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
-      ctx.strokeRect(-w/2, -h/2, w, h);
+      const w = GRID * 1.35,
+        h = GRID * 0.5,
+        col = sel ? colSel : hov ? colHov : "#92400e";
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.strokeRect(-w / 2, -h / 2, w, h);
       ctx.beginPath();
-      ctx.moveTo(-GRID*2,0); ctx.lineTo(-w/2,0);
-      ctx.moveTo(w/2,0); ctx.lineTo(GRID*2,0);
+      ctx.moveTo(-GRID * 2, 0);
+      ctx.lineTo(-w / 2, 0);
+      ctx.moveTo(w / 2, 0);
+      ctx.lineTo(GRID * 2, 0);
       ctx.stroke();
       ctx.fillStyle = col;
-      ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
-      ctx.fillText(fmtOhm(comp.props.resistance as number), 0, -h/2-5);
+      ctx.font = "bold 9px 'JetBrains Mono',monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(fmtOhm(comp.props.resistance as number), 0, -h / 2 - 5);
     },
   },
 
   capacitor: {
-    label: "Condensateur", symbol: "C", color: "#065f46",
-    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    label: "Condensateur",
+    symbol: "C",
+    color: "#065f46",
+    terminals: [
+      { x: -2, y: 0 },
+      { x: 2, y: 0 },
+    ],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.capacitor),
-    propDefs: [{ key:"capacitance", label:"Capacité (F)", type:"number", min:0 }],
+    propDefs: [
+      { key: "capacitance", label: "Capacité (F)", type: "number", min: 0 },
+    ],
     draw(ctx, comp, sel, hov) {
-      const gap = 7, col = sel ? colSel : hov ? colHov : "#065f46";
-      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      const gap = 7,
+        col = sel ? colSel : hov ? colHov : "#065f46";
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sel ? 2.5 : 2;
       ctx.beginPath();
-      ctx.moveTo(-GRID*2,0); ctx.lineTo(-gap,0);
-      ctx.moveTo(gap,0); ctx.lineTo(GRID*2,0);
+      ctx.moveTo(-GRID * 2, 0);
+      ctx.lineTo(-gap, 0);
+      ctx.moveTo(gap, 0);
+      ctx.lineTo(GRID * 2, 0);
       ctx.stroke();
       ctx.lineWidth = sel ? 3 : 2.5;
       ctx.beginPath();
-      ctx.moveTo(-gap,-GRID*0.7); ctx.lineTo(-gap,GRID*0.7);
-      ctx.moveTo(gap,-GRID*0.7); ctx.lineTo(gap,GRID*0.7);
+      ctx.moveTo(-gap, -GRID * 0.7);
+      ctx.lineTo(-gap, GRID * 0.7);
+      ctx.moveTo(gap, -GRID * 0.7);
+      ctx.lineTo(gap, GRID * 0.7);
       ctx.stroke();
       ctx.fillStyle = col;
-      ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
-      ctx.fillText(fmtFarad(comp.props.capacitance as number), 0, -GRID*0.7-5);
+      ctx.font = "bold 9px 'JetBrains Mono',monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        fmtFarad(comp.props.capacitance as number),
+        0,
+        -GRID * 0.7 - 5,
+      );
     },
   },
 
   inductor: {
-    label: "Inducteur", symbol: "L", color: "#4c1d95",
-    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    label: "Inducteur",
+    symbol: "L",
+    color: "#4c1d95",
+    terminals: [
+      { x: -2, y: 0 },
+      { x: 2, y: 0 },
+    ],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.inductor),
-    propDefs: [{ key:"inductance", label:"Inductance (H)", type:"number", min:0 }],
+    propDefs: [
+      { key: "inductance", label: "Inductance (H)", type: "number", min: 0 },
+    ],
     draw(ctx, comp, sel, hov) {
       const col = sel ? colSel : hov ? colHov : "#4c1d95";
-      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sel ? 2.5 : 2;
       ctx.beginPath();
-      ctx.moveTo(-GRID*2,0); ctx.lineTo(-GRID*1.2,0);
-      for (let i=0; i<4; i++) ctx.arc(-GRID*1.2+i*GRID*0.6+GRID*0.3, 0, GRID*0.3, Math.PI, 0);
-      ctx.lineTo(GRID*2,0); ctx.stroke();
+      ctx.moveTo(-GRID * 2, 0);
+      ctx.lineTo(-GRID * 1.2, 0);
+      for (let i = 0; i < 4; i++)
+        ctx.arc(
+          -GRID * 1.2 + i * GRID * 0.6 + GRID * 0.3,
+          0,
+          GRID * 0.3,
+          Math.PI,
+          0,
+        );
+      ctx.lineTo(GRID * 2, 0);
+      ctx.stroke();
       ctx.fillStyle = col;
-      ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
-      ctx.fillText(fmtHenry(comp.props.inductance as number), 0, -GRID*0.4-5);
+      ctx.font = "bold 9px 'JetBrains Mono',monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        fmtHenry(comp.props.inductance as number),
+        0,
+        -GRID * 0.4 - 5,
+      );
     },
   },
 
   vsource: {
-    label: "Source de tension", symbol: "V", color: "#991b1b",
-    terminals: [{ x:0, y:-2 }, { x:0, y:2 }],
+    label: "Source de tension",
+    symbol: "V",
+    color: "#991b1b",
+    terminals: [
+      { x: 0, y: -2 },
+      { x: 0, y: 2 },
+    ],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.vsource),
-    propDefs: [{ key:"voltage", label:"Tension (V)", type:"number", step:0.5 }],
+    propDefs: [
+      { key: "voltage", label: "Tension (V)", type: "number", step: 0.5 },
+    ],
     draw(ctx, comp, sel, hov) {
-      const r = GRID*0.85, col = sel ? colSel : hov ? colHov : "#991b1b";
-      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
-      ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
+      const r = GRID * 0.85,
+        col = sel ? colSel : hov ? colHov : "#991b1b";
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sel ? 2.5 : 2;
       ctx.beginPath();
-      ctx.moveTo(0,-GRID*2); ctx.lineTo(0,-r);
-      ctx.moveTo(0,r); ctx.lineTo(0,GRID*2);
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -GRID * 2);
+      ctx.lineTo(0, -r);
+      ctx.moveTo(0, r);
+      ctx.lineTo(0, GRID * 2);
       ctx.stroke();
       ctx.fillStyle = col;
-      ctx.font = "bold 10px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
-      ctx.fillText("+", 0, -GRID*0.22); ctx.fillText("−", 0, GRID*0.42);
+      ctx.font = "bold 10px 'JetBrains Mono',monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("+", 0, -GRID * 0.22);
+      ctx.fillText("−", 0, GRID * 0.42);
       ctx.font = "bold 9px 'JetBrains Mono',monospace";
-      ctx.fillText(`${comp.props.voltage as number}V`, 0, -r-5);
+      ctx.fillText(`${comp.props.voltage as number}V`, 0, -r - 5);
     },
   },
 
   ground: {
-    label: "Masse", symbol: "GND", color: "#1f2937",
-    terminals: [{ x:0, y:-1 }],
+    label: "Masse",
+    symbol: "GND",
+    color: "#1f2937",
+    terminals: [{ x: 0, y: -1 }],
     defaultProps: {},
     propDefs: [],
     draw(ctx, _comp, sel, hov) {
       const col = sel ? colSel : hov ? colHov : "#1f2937";
-      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
-      ctx.beginPath(); ctx.moveTo(0,-GRID); ctx.lineTo(0,0); ctx.stroke();
-      const bars = [{ w:0.75, y:0 }, { w:0.5, y:GRID*0.33 }, { w:0.25, y:GRID*0.66 }];
-      for (const b of bars) { ctx.beginPath(); ctx.moveTo(-b.w*GRID,b.y); ctx.lineTo(b.w*GRID,b.y); ctx.stroke(); }
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sel ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -GRID);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+      const bars = [
+        { w: 0.75, y: 0 },
+        { w: 0.5, y: GRID * 0.33 },
+        { w: 0.25, y: GRID * 0.66 },
+      ];
+      for (const b of bars) {
+        ctx.beginPath();
+        ctx.moveTo(-b.w * GRID, b.y);
+        ctx.lineTo(b.w * GRID, b.y);
+        ctx.stroke();
+      }
     },
   },
 
   switch: {
-    label: "Interrupteur", symbol: "SW", color: "#14532d",
-    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    label: "Interrupteur",
+    symbol: "SW",
+    color: "#14532d",
+    terminals: [
+      { x: -2, y: 0 },
+      { x: 2, y: 0 },
+    ],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.switch),
-    propDefs: [{ key:"closed", label:"Fermé", type:"boolean" }],
+    propDefs: [{ key: "closed", label: "Fermé", type: "boolean" }],
     draw(ctx, comp, sel, hov) {
-      const col = sel ? colSel : hov ? colHov : "#14532d", r = GRID*0.2;
-      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      const col = sel ? colSel : hov ? colHov : "#14532d",
+        r = GRID * 0.2;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sel ? 2.5 : 2;
       ctx.beginPath();
-      ctx.moveTo(-GRID*2,0); ctx.lineTo(-GRID,0);
-      ctx.moveTo(GRID,0); ctx.lineTo(GRID*2,0);
+      ctx.moveTo(-GRID * 2, 0);
+      ctx.lineTo(-GRID, 0);
+      ctx.moveTo(GRID, 0);
+      ctx.lineTo(GRID * 2, 0);
       ctx.stroke();
-      ctx.beginPath(); ctx.arc(-GRID,0,r,0,Math.PI*2); ctx.stroke();
-      ctx.beginPath(); ctx.arc(GRID,0,r,0,Math.PI*2); ctx.stroke();
       ctx.beginPath();
-      if (comp.props.closed) { ctx.moveTo(-GRID+r,0); ctx.lineTo(GRID-r,0); }
-      else { ctx.moveTo(-GRID+r*0.7,-r*0.7); ctx.lineTo(GRID*0.35,-GRID*0.5); }
+      ctx.arc(-GRID, 0, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(GRID, 0, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      if (comp.props.closed) {
+        ctx.moveTo(-GRID + r, 0);
+        ctx.lineTo(GRID - r, 0);
+      } else {
+        ctx.moveTo(-GRID + r * 0.7, -r * 0.7);
+        ctx.lineTo(GRID * 0.35, -GRID * 0.5);
+      }
       ctx.stroke();
     },
   },
 
   led: {
-    label: "LED", symbol: "▶", color: "#9a3412",
-    terminals: [{ x:-2, y:0 }, { x:2, y:0 }],
+    label: "LED",
+    symbol: "▶",
+    color: "#9a3412",
+    terminals: [
+      { x: -2, y: 0 },
+      { x: 2, y: 0 },
+    ],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.led),
     propDefs: [
-      { key:"color", label:"Couleur LED", type:"select", options:["red","green","blue","yellow","white"] },
-      { key:"forwardVoltage", label:"Tension seuil Vf (V)", type:"number", min:0, step:0.1 },
+      {
+        key: "color",
+        label: "Couleur LED",
+        type: "select",
+        options: ["red", "green", "blue", "yellow", "white"],
+      },
+      {
+        key: "forwardVoltage",
+        label: "Tension seuil Vf (V)",
+        type: "number",
+        min: 0,
+        step: 0.1,
+      },
     ],
     draw(ctx, comp, sel, hov) {
-      const col = sel ? colSel : hov ? colHov : "#9a3412", s = GRID*0.7;
-      ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
+      const col = sel ? colSel : hov ? colHov : "#9a3412",
+        s = GRID * 0.7;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sel ? 2.5 : 2;
       ctx.beginPath();
-      ctx.moveTo(-GRID*2,0); ctx.lineTo(-s,0);
-      ctx.moveTo(s,0); ctx.lineTo(GRID*2,0);
+      ctx.moveTo(-GRID * 2, 0);
+      ctx.lineTo(-s, 0);
+      ctx.moveTo(s, 0);
+      ctx.lineTo(GRID * 2, 0);
       ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-s,-s); ctx.lineTo(-s,s); ctx.lineTo(s,0); ctx.closePath();
+      ctx.beginPath();
+      ctx.moveTo(-s, -s);
+      ctx.lineTo(-s, s);
+      ctx.lineTo(s, 0);
+      ctx.closePath();
       ctx.stroke();
-      ctx.fillStyle = sel ? "rgba(37,99,235,.15)" : `${comp.props.color as string}33`; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(s,-s); ctx.lineTo(s,s); ctx.stroke();
+      ctx.fillStyle = sel
+        ? "rgba(37,99,235,.15)"
+        : `${comp.props.color as string}33`;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(s, -s);
+      ctx.lineTo(s, s);
+      ctx.stroke();
       ctx.lineWidth = 1.2;
-      for (let i=0; i<2; i++) {
-        const ox=GRID*0.3+i*GRID*0.28, oy=-GRID*0.6-i*GRID*0.1;
-        ctx.beginPath(); ctx.moveTo(ox,oy); ctx.lineTo(ox+GRID*0.28,oy-GRID*0.32); ctx.stroke();
+      for (let i = 0; i < 2; i++) {
+        const ox = GRID * 0.3 + i * GRID * 0.28,
+          oy = -GRID * 0.6 - i * GRID * 0.1;
         ctx.beginPath();
-        ctx.moveTo(ox+GRID*0.28,oy-GRID*0.32); ctx.lineTo(ox+GRID*0.18,oy-GRID*0.32);
-        ctx.moveTo(ox+GRID*0.28,oy-GRID*0.32); ctx.lineTo(ox+GRID*0.28,oy-GRID*0.2);
+        ctx.moveTo(ox, oy);
+        ctx.lineTo(ox + GRID * 0.28, oy - GRID * 0.32);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ox + GRID * 0.28, oy - GRID * 0.32);
+        ctx.lineTo(ox + GRID * 0.18, oy - GRID * 0.32);
+        ctx.moveTo(ox + GRID * 0.28, oy - GRID * 0.32);
+        ctx.lineTo(ox + GRID * 0.28, oy - GRID * 0.2);
         ctx.stroke();
       }
     },
@@ -337,7 +577,11 @@ const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
 
 // ─── Camera ───────────────────────────────────────────────────────────────────
 
-interface Camera { x: number; y: number; z: number; }
+interface Camera {
+  x: number;
+  y: number;
+  z: number;
+}
 
 // ─── World-space terminal positions ──────────────────────────────────────────
 
@@ -345,65 +589,115 @@ function termWorlds(comp: Component): Vec2[] {
   const def = COMPONENT_DEFS[comp.type];
   if (!def) return [];
   const rad = (comp.rotation * Math.PI) / 180;
-  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const cos = Math.cos(rad),
+    sin = Math.sin(rad);
   return def.terminals.map((t) => {
-    const wx = t.x * GRID, wy = t.y * GRID;
-    return { x: comp.position.x + wx*cos - wy*sin, y: comp.position.y + wx*sin + wy*cos };
+    const wx = t.x * GRID,
+      wy = t.y * GRID;
+    return {
+      x: comp.position.x + wx * cos - wy * sin,
+      y: comp.position.y + wx * sin + wy * cos,
+    };
   });
 }
 
 function orthoRoute(a: Vec2, b: Vec2): Vec2[] {
   const pts: Vec2[] = [{ ...a }];
   if (a.x !== b.x) pts.push({ x: b.x, y: a.y });
-  if (pts[pts.length-1].x !== b.x || pts[pts.length-1].y !== b.y) pts.push({ ...b });
+  if (pts[pts.length - 1].x !== b.x || pts[pts.length - 1].y !== b.y)
+    pts.push({ ...b });
   else if (pts.length === 1) pts.push({ ...b });
   return pts;
 }
 
-function snapToNearby(components: Component[], wires: Wire[], world: Vec2, radius = GRID * 0.85): Vec2 {
-  let best = radius, pt = snapVec(world);
-  for (const c of components) for (const t of termWorlds(c)) { const d = dist(t, world); if (d < best) { best = d; pt = snapVec(t); } }
-  for (const w of wires) for (const p of w.points) { const d = dist(p, world); if (d < best) { best = d; pt = snapVec(p); } }
+function snapToNearby(
+  components: Component[],
+  wires: Wire[],
+  world: Vec2,
+  radius = GRID * 0.85,
+): Vec2 {
+  let best = radius,
+    pt = snapVec(world);
+  for (const c of components)
+    for (const t of termWorlds(c)) {
+      const d = dist(t, world);
+      if (d < best) {
+        best = d;
+        pt = snapVec(t);
+      }
+    }
+  for (const w of wires)
+    for (const p of w.points) {
+      const d = dist(p, world);
+      if (d < best) {
+        best = d;
+        pt = snapVec(p);
+      }
+    }
   return pt;
 }
 
 function hitComponent(comp: Component, pt: Vec2): boolean {
   const ts = termWorlds(comp);
-  const allX = [comp.position.x, ...ts.map(t => t.x)];
-  const allY = [comp.position.y, ...ts.map(t => t.y)];
+  const allX = [comp.position.x, ...ts.map((t) => t.x)];
+  const allY = [comp.position.y, ...ts.map((t) => t.y)];
   const pad = GRID * 0.85;
-  return pt.x >= Math.min(...allX)-pad && pt.x <= Math.max(...allX)+pad
-      && pt.y >= Math.min(...allY)-pad && pt.y <= Math.max(...allY)+pad;
+  return (
+    pt.x >= Math.min(...allX) - pad &&
+    pt.x <= Math.max(...allX) + pad &&
+    pt.y >= Math.min(...allY) - pad &&
+    pt.y <= Math.max(...allY) + pad
+  );
 }
 
 function hitWire(wire: Wire, pt: Vec2): boolean {
-  const ps = wire.points, thr = GRID * 0.42;
-  for (let i = 0; i < ps.length-1; i++) {
-    const a = ps[i], b = ps[i+1];
-    const l2 = (b.x-a.x)**2 + (b.y-a.y)**2;
+  const ps = wire.points,
+    thr = GRID * 0.42;
+  for (let i = 0; i < ps.length - 1; i++) {
+    const a = ps[i],
+      b = ps[i + 1];
+    const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
     if (l2 < 1) continue;
-    let t = ((pt.x-a.x)*(b.x-a.x)+(pt.y-a.y)*(b.y-a.y))/l2;
+    let t = ((pt.x - a.x) * (b.x - a.x) + (pt.y - a.y) * (b.y - a.y)) / l2;
     t = Math.max(0, Math.min(1, t));
-    if (Math.hypot(pt.x-(a.x+t*(b.x-a.x)), pt.y-(a.y+t*(b.y-a.y))) < thr) return true;
+    if (
+      Math.hypot(
+        pt.x - (a.x + t * (b.x - a.x)),
+        pt.y - (a.y + t * (b.y - a.y)),
+      ) < thr
+    )
+      return true;
   }
   return false;
 }
 
-function hitTest(components: Component[], wires: Wire[], pt: Vec2): string | null {
-  for (let i = components.length-1; i >= 0; i--) if (hitComponent(components[i], pt)) return components[i].id;
-  for (let i = wires.length-1; i >= 0; i--)  if (hitWire(wires[i], pt)) return wires[i].id;
+function hitTest(
+  components: Component[],
+  wires: Wire[],
+  pt: Vec2,
+): string | null {
+  for (let i = components.length - 1; i >= 0; i--)
+    if (hitComponent(components[i], pt)) return components[i].id;
+  for (let i = wires.length - 1; i >= 0; i--)
+    if (hitWire(wires[i], pt)) return wires[i].id;
   return null;
 }
 
 function findJunctions(components: Component[], wires: Wire[]): Vec2[] {
-  const result: Vec2[] = [], candidates: Vec2[] = [];
+  const result: Vec2[] = [],
+    candidates: Vec2[] = [];
   for (const c of components) for (const t of termWorlds(c)) candidates.push(t);
-  for (const w of wires) { candidates.push(w.points[0]); candidates.push(w.points[w.points.length-1]); }
+  for (const w of wires) {
+    candidates.push(w.points[0]);
+    candidates.push(w.points[w.points.length - 1]);
+  }
   for (const pt of candidates) {
     let count = 0;
-    for (const w of wires) for (const wp of w.points) if (dist(pt, wp) < 2) count++;
-    for (const c of components) for (const t of termWorlds(c)) if (dist(pt, t) < 2) count++;
-    if (count >= 3 && !result.some(r => dist(r, pt) < 2)) result.push(pt);
+    for (const w of wires)
+      for (const wp of w.points) if (dist(pt, wp) < 2) count++;
+    for (const c of components)
+      for (const t of termWorlds(c)) if (dist(pt, t) < 2) count++;
+    if (count >= 3 && !result.some((r) => dist(r, pt) < 2)) result.push(pt);
   }
   return result;
 }
@@ -417,7 +711,7 @@ export type NetlistComponent =
   | { type: "V"; name: string; n1: string; n2: string; value: number }
   | { type: "C"; name: string; n1: string; n2: string; value: number }
   | { type: "L"; name: string; n1: string; n2: string; value: number }
-  | { type: "D"; name: string; n1: string; n2: string; vf: number   }
+  | { type: "D"; name: string; n1: string; n2: string; vf: number }
   | { type: "S"; name: string; n1: string; n2: string; state: boolean };
 
 export interface Netlist {
@@ -425,12 +719,14 @@ export interface Netlist {
   components: NetlistComponent[];
   warnings: string[];
   componentNodes: Map<string, [string, string]>; // compId → [n1, n2]
-  componentNames: Map<string, string>;           // compId → netlist name ("R1", "V2"…)
+  componentNames: Map<string, string>; // compId → netlist name ("R1", "V2"…)
 }
 
 class UnionFind {
   private parent = new Map<string, string>();
-  private key(p: Vec2): string { return `${snap(p.x)},${snap(p.y)}`; }
+  private key(p: Vec2): string {
+    return `${snap(p.x)},${snap(p.y)}`;
+  }
   add(p: Vec2): string {
     const k = this.key(p);
     if (!this.parent.has(k)) this.parent.set(k, k);
@@ -445,8 +741,10 @@ class UnionFind {
     return k;
   }
   union(a: Vec2, b: Vec2): void {
-    this.add(a); this.add(b);
-    const ra = this.find(a), rb = this.find(b);
+    this.add(a);
+    this.add(b);
+    const ra = this.find(a),
+      rb = this.find(b);
     if (ra !== rb) this.parent.set(ra, rb);
   }
 }
@@ -457,8 +755,9 @@ export function generateNetlist(circuit: Circuit): Netlist {
 
   for (const wire of circuit.wires) {
     if (wire.points.length === 0) continue;
-    wire.points.forEach(p => uf.add(p));
-    for (let i = 0; i < wire.points.length-1; i++) uf.union(wire.points[i], wire.points[i+1]);
+    wire.points.forEach((p) => uf.add(p));
+    for (let i = 0; i < wire.points.length - 1; i++)
+      uf.union(wire.points[i], wire.points[i + 1]);
   }
 
   for (const comp of circuit.components) {
@@ -479,7 +778,10 @@ export function generateNetlist(circuit: Circuit): Netlist {
       if (tw) groundRoots.add(uf.find(tw));
     }
   }
-  if (groundRoots.size === 0) warnings.push("Aucun composant de masse trouvé. Le nœud '0' ne sera pas défini.");
+  if (groundRoots.size === 0)
+    warnings.push(
+      "Aucun composant de masse trouvé. Le nœud '0' ne sera pas défini.",
+    );
 
   const rootToNode = new Map<string, string>();
   for (const gr of groundRoots) rootToNode.set(gr, "0");
@@ -493,7 +795,10 @@ export function generateNetlist(circuit: Circuit): Netlist {
 
   const nlComps: NetlistComponent[] = [];
   const counters: Record<string, number> = {};
-  const nextName = (prefix: string) => { counters[prefix] = (counters[prefix] ?? 0) + 1; return `${prefix}${counters[prefix]}`; };
+  const nextName = (prefix: string) => {
+    counters[prefix] = (counters[prefix] ?? 0) + 1;
+    return `${prefix}${counters[prefix]}`;
+  };
   const componentNodes = new Map<string, [string, string]>();
   const componentNames = new Map<string, string>();
 
@@ -508,45 +813,131 @@ export function generateNetlist(circuit: Circuit): Netlist {
       return name;
     };
     switch (comp.type) {
-      case "resistor": { const a=n1(),b=n2(); nlComps.push({ type:"R", name:reg("R",a,b), n1:a, n2:b, value:comp.props.resistance as number }); break; }
-      case "capacitor":{ const a=n1(),b=n2(); nlComps.push({ type:"C", name:reg("C",a,b), n1:a, n2:b, value:comp.props.capacitance as number}); break; }
-      case "inductor": { const a=n1(),b=n2(); nlComps.push({ type:"L", name:reg("L",a,b), n1:a, n2:b, value:comp.props.inductance as number }); break; }
-      case "vsource":  { const a=n1(),b=n2(); nlComps.push({ type:"V", name:reg("V",a,b), n1:a, n2:b, value:comp.props.voltage as number   }); break; }
-      case "led":      { const a=n1(),b=n2(); nlComps.push({ type:"D", name:reg("D",a,b), n1:a, n2:b, vf:comp.props.forwardVoltage as number}); break; }
-      case "switch":   { const a=n1(),b=n2(); nlComps.push({ type:"S", name:reg("S",a,b), n1:a, n2:b, state:comp.props.closed as boolean  }); break; }
-      case "ground": break;
+      case "resistor": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "R",
+          name: reg("R", a, b),
+          n1: a,
+          n2: b,
+          value: comp.props.resistance as number,
+        });
+        break;
+      }
+      case "capacitor": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "C",
+          name: reg("C", a, b),
+          n1: a,
+          n2: b,
+          value: comp.props.capacitance as number,
+        });
+        break;
+      }
+      case "inductor": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "L",
+          name: reg("L", a, b),
+          n1: a,
+          n2: b,
+          value: comp.props.inductance as number,
+        });
+        break;
+      }
+      case "vsource": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "V",
+          name: reg("V", a, b),
+          n1: a,
+          n2: b,
+          value: comp.props.voltage as number,
+        });
+        break;
+      }
+      case "led": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "D",
+          name: reg("D", a, b),
+          n1: a,
+          n2: b,
+          vf: comp.props.forwardVoltage as number,
+        });
+        break;
+      }
+      case "switch": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "S",
+          name: reg("S", a, b),
+          n1: a,
+          n2: b,
+          state: comp.props.closed as boolean,
+        });
+        break;
+      }
+      case "ground":
+        break;
     }
   }
 
   const nodeSet = new Set<string>();
-  for (const nc of nlComps) { nodeSet.add(nc.n1); nodeSet.add(nc.n2); }
+  for (const nc of nlComps) {
+    nodeSet.add(nc.n1);
+    nodeSet.add(nc.n2);
+  }
   const nodeCount = new Map<string, number>();
   for (const nc of nlComps) {
     nodeCount.set(nc.n1, (nodeCount.get(nc.n1) ?? 0) + 1);
     nodeCount.set(nc.n2, (nodeCount.get(nc.n2) ?? 0) + 1);
   }
   for (const [node, count] of nodeCount) {
-    if (count < 2) warnings.push(`Le nœud ${node} semble flottant (1 seule connexion).`);
+    if (count < 2)
+      warnings.push(`Le nœud ${node} semble flottant (1 seule connexion).`);
   }
 
   const nodes = Array.from(nodeSet).sort((a, b) => {
-    const na = parseInt(a), nb = parseInt(b);
-    return (isNaN(na) || isNaN(nb)) ? a.localeCompare(b) : na - nb;
+    const na = parseInt(a),
+      nb = parseInt(b);
+    return isNaN(na) || isNaN(nb) ? a.localeCompare(b) : na - nb;
   });
 
-  return { nodes, components: nlComps, warnings, componentNodes, componentNames };
+  return {
+    nodes,
+    components: nlComps,
+    warnings,
+    componentNodes,
+    componentNames,
+  };
 }
 
 export function netlistToString(netlist: Netlist): string {
   const lines: string[] = [];
   for (const nc of netlist.components) {
     switch (nc.type) {
-      case "R": case "C": case "L": case "V":
-        lines.push(`${nc.name} ${nc.n1} ${nc.n2} ${nc.value}`); break;
+      case "R":
+      case "C":
+      case "L":
+      case "V":
+        lines.push(`${nc.name} ${nc.n1} ${nc.n2} ${nc.value}`);
+        break;
       case "D":
-        lines.push(`${nc.name} ${nc.n1} ${nc.n2} VF=${nc.vf}`); break;
+        lines.push(`${nc.name} ${nc.n1} ${nc.n2} VF=${nc.vf}`);
+        break;
       case "S":
-        lines.push(`${nc.name} ${nc.n1} ${nc.n2} ${nc.state ? "CLOSED" : "OPEN"}`); break;
+        lines.push(
+          `${nc.name} ${nc.n1} ${nc.n2} ${nc.state ? "CLOSED" : "OPEN"}`,
+        );
+        break;
     }
   }
   if (netlist.warnings.length > 0) {
@@ -560,12 +951,18 @@ export function netlistToString(netlist: Netlist): string {
 
 function fmtNetlistComp(nc: NetlistComponent): string {
   switch (nc.type) {
-    case "R": return `${nc.name} — ${fmtOhm(nc.value)}`;
-    case "C": return `${nc.name} — ${fmtFarad(nc.value)}`;
-    case "L": return `${nc.name} — ${fmtHenry(nc.value)}`;
-    case "V": return `${nc.name} — ${nc.value}V`;
-    case "D": return `${nc.name} — LED ${nc.vf}V`;
-    case "S": return `${nc.name} — ${nc.state ? UI.closed : UI.open}`;
+    case "R":
+      return `${nc.name} — ${fmtOhm(nc.value)}`;
+    case "C":
+      return `${nc.name} — ${fmtFarad(nc.value)}`;
+    case "L":
+      return `${nc.name} — ${fmtHenry(nc.value)}`;
+    case "V":
+      return `${nc.name} — ${nc.value}V`;
+    case "D":
+      return `${nc.name} — LED ${nc.vf}V`;
+    case "S":
+      return `${nc.name} — ${nc.state ? UI.closed : UI.open}`;
   }
 }
 
@@ -574,14 +971,19 @@ function fmtNetlistComp(nc: NetlistComponent): string {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 type ToolMode = "select" | "wire" | "place";
-interface HistoryEntry { components: Component[]; wires: Wire[]; }
+interface HistoryEntry {
+  components: Component[];
+  wires: Wire[];
+}
 
 function readPersistedTheme(): boolean {
   try {
     const v = localStorage.getItem(THEME_STORAGE_KEY);
-    if (v === "dark")  return true;
+    if (v === "dark") return true;
     if (v === "light") return false;
-  } catch { /* SSR */ }
+  } catch {
+    /* SSR */
+  }
   return false;
 }
 
@@ -602,28 +1004,34 @@ interface AppState {
 }
 
 type Action =
-  | { type: "SET_TOOL";        tool: ToolMode; placingType?: ComponentType | null }
-  | { type: "SET_MOUSE";       pos: Vec2 }
-  | { type: "SET_GHOST";       pos: Vec2; rot?: Rotation }
+  | { type: "SET_TOOL"; tool: ToolMode; placingType?: ComponentType | null }
+  | { type: "SET_MOUSE"; pos: Vec2 }
+  | { type: "SET_GHOST"; pos: Vec2; rot?: Rotation }
   | { type: "ROTATE_GHOST" }
-  | { type: "ADD_COMPONENT";   comp: Component }
-  | { type: "ADD_WIRE";        wire: Wire }
+  | { type: "ADD_COMPONENT"; comp: Component }
+  | { type: "ADD_WIRE"; wire: Wire }
   | { type: "SET_WIRE_POINTS"; pts: Vec2[] }
   | { type: "DELETE_SELECTED" }
-  | { type: "SELECT";          ids: string[] }
-  | { type: "MOVE_SELECTION";  dx: number; dy: number }
+  | { type: "SELECT"; ids: string[] }
+  | { type: "MOVE_SELECTION"; dx: number; dy: number }
   | { type: "ROTATE_SELECTED" }
-  | { type: "UPDATE_PROP";     id: string; key: string; value: unknown }
+  | { type: "UPDATE_PROP"; id: string; key: string; value: unknown }
   | { type: "UNDO" }
   | { type: "REDO" }
-  | { type: "LOAD";            components: Component[]; wires: Wire[] }
+  | { type: "LOAD"; components: Component[]; wires: Wire[] }
   | { type: "TOGGLE_GRID" }
   | { type: "TOGGLE_DARK" };
 
 const initialState: AppState = {
-  components: [], wires: [], selection: [],
-  tool: "select", placingType: null, wirePoints: [],
-  mouseWorld: { x:0, y:0 }, ghostPos: null, ghostRot: 0,
+  components: [],
+  wires: [],
+  selection: [],
+  tool: "select",
+  placingType: null,
+  wirePoints: [],
+  mouseWorld: { x: 0, y: 0 },
+  ghostPos: null,
+  ghostRot: 0,
   showGrid: true,
   darkMode: readPersistedTheme(),
   history: [{ components: [], wires: [] }],
@@ -631,64 +1039,152 @@ const initialState: AppState = {
 };
 
 function cloneCircuit(s: AppState) {
-  return { components: JSON.parse(JSON.stringify(s.components)), wires: JSON.parse(JSON.stringify(s.wires)) };
+  return {
+    components: JSON.parse(JSON.stringify(s.components)),
+    wires: JSON.parse(JSON.stringify(s.wires)),
+  };
 }
 function cloneEntry(e: HistoryEntry) {
-  return { components: JSON.parse(JSON.stringify(e.components)), wires: JSON.parse(JSON.stringify(e.wires)) };
+  return {
+    components: JSON.parse(JSON.stringify(e.components)),
+    wires: JSON.parse(JSON.stringify(e.wires)),
+  };
 }
 function pushHistory(state: AppState): AppState {
   const entry = cloneCircuit(state);
-  const history = [...state.history.slice(0, state.historyIdx+1), entry];
+  const history = [...state.history.slice(0, state.historyIdx + 1), entry];
   if (history.length > 80) history.shift();
-  return { ...state, history, historyIdx: history.length-1 };
+  return { ...state, history, historyIdx: history.length - 1 };
 }
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case "SET_TOOL":         return { ...state, tool: action.tool, placingType: action.placingType ?? null, wirePoints: [], selection: [], ghostPos: null };
-    case "SET_MOUSE":        return { ...state, mouseWorld: action.pos };
-    case "SET_GHOST":        return { ...state, ghostPos: action.pos, ghostRot: action.rot ?? state.ghostRot };
-    case "ROTATE_GHOST":     return { ...state, ghostRot: ((state.ghostRot+90)%360) as Rotation };
-    case "ADD_COMPONENT":    return pushHistory({ ...state, components: [...state.components, action.comp] });
-    case "ADD_WIRE":         return pushHistory({ ...state, wires: [...state.wires, action.wire] });
-    case "SET_WIRE_POINTS":  return { ...state, wirePoints: action.pts };
+    case "SET_TOOL":
+      return {
+        ...state,
+        tool: action.tool,
+        placingType: action.placingType ?? null,
+        wirePoints: [],
+        selection: [],
+        ghostPos: null,
+      };
+    case "SET_MOUSE":
+      return { ...state, mouseWorld: action.pos };
+    case "SET_GHOST":
+      return {
+        ...state,
+        ghostPos: action.pos,
+        ghostRot: action.rot ?? state.ghostRot,
+      };
+    case "ROTATE_GHOST":
+      return { ...state, ghostRot: ((state.ghostRot + 90) % 360) as Rotation };
+    case "ADD_COMPONENT":
+      return pushHistory({
+        ...state,
+        components: [...state.components, action.comp],
+      });
+    case "ADD_WIRE":
+      return pushHistory({ ...state, wires: [...state.wires, action.wire] });
+    case "SET_WIRE_POINTS":
+      return { ...state, wirePoints: action.pts };
     case "DELETE_SELECTED": {
       const ids = new Set(state.selection);
-      return pushHistory({ ...state, components: state.components.filter(c => !ids.has(c.id)), wires: state.wires.filter(w => !ids.has(w.id)), selection: [] });
+      return pushHistory({
+        ...state,
+        components: state.components.filter((c) => !ids.has(c.id)),
+        wires: state.wires.filter((w) => !ids.has(w.id)),
+        selection: [],
+      });
     }
-    case "SELECT":           return { ...state, selection: action.ids };
+    case "SELECT":
+      return { ...state, selection: action.ids };
     case "MOVE_SELECTION": {
       const ids = new Set(state.selection);
-      return { ...state,
-        components: state.components.map(c => ids.has(c.id) ? { ...c, position: { x: c.position.x+action.dx, y: c.position.y+action.dy } } : c),
-        wires: state.wires.map(w => ids.has(w.id) ? { ...w, points: w.points.map(p => ({ x: p.x+action.dx, y: p.y+action.dy })) } : w),
+      return {
+        ...state,
+        components: state.components.map((c) =>
+          ids.has(c.id)
+            ? {
+                ...c,
+                position: {
+                  x: c.position.x + action.dx,
+                  y: c.position.y + action.dy,
+                },
+              }
+            : c,
+        ),
+        wires: state.wires.map((w) =>
+          ids.has(w.id)
+            ? {
+                ...w,
+                points: w.points.map((p) => ({
+                  x: p.x + action.dx,
+                  y: p.y + action.dy,
+                })),
+              }
+            : w,
+        ),
       };
     }
     case "ROTATE_SELECTED": {
       const ids = new Set(state.selection);
-      return pushHistory({ ...state, components: state.components.map(c => ids.has(c.id) ? { ...c, rotation: ((c.rotation+90)%360) as Rotation } : c) });
+      return pushHistory({
+        ...state,
+        components: state.components.map((c) =>
+          ids.has(c.id)
+            ? { ...c, rotation: ((c.rotation + 90) % 360) as Rotation }
+            : c,
+        ),
+      });
     }
     case "UPDATE_PROP":
-      return pushHistory({ ...state, components: state.components.map(c => c.id === action.id ? { ...c, props: { ...c.props, [action.key]: action.value } } : c) });
+      return pushHistory({
+        ...state,
+        components: state.components.map((c) =>
+          c.id === action.id
+            ? { ...c, props: { ...c.props, [action.key]: action.value } }
+            : c,
+        ),
+      });
     case "UNDO": {
       if (state.historyIdx <= 0) return state;
-      const idx = state.historyIdx-1;
-      return { ...state, historyIdx: idx, ...cloneEntry(state.history[idx]), selection: [] };
+      const idx = state.historyIdx - 1;
+      return {
+        ...state,
+        historyIdx: idx,
+        ...cloneEntry(state.history[idx]),
+        selection: [],
+      };
     }
     case "REDO": {
-      if (state.historyIdx >= state.history.length-1) return state;
-      const idx = state.historyIdx+1;
-      return { ...state, historyIdx: idx, ...cloneEntry(state.history[idx]), selection: [] };
+      if (state.historyIdx >= state.history.length - 1) return state;
+      const idx = state.historyIdx + 1;
+      return {
+        ...state,
+        historyIdx: idx,
+        ...cloneEntry(state.history[idx]),
+        selection: [],
+      };
     }
     case "LOAD":
-      return pushHistory({ ...state, components: action.components, wires: action.wires, selection: [], wirePoints: [] });
-    case "TOGGLE_GRID":  return { ...state, showGrid: !state.showGrid };
+      return pushHistory({
+        ...state,
+        components: action.components,
+        wires: action.wires,
+        selection: [],
+        wirePoints: [],
+      });
+    case "TOGGLE_GRID":
+      return { ...state, showGrid: !state.showGrid };
     case "TOGGLE_DARK": {
       const next = !state.darkMode;
-      try { localStorage.setItem(THEME_STORAGE_KEY, next ? "dark" : "light"); } catch {}
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, next ? "dark" : "light");
+      } catch {}
       return { ...state, darkMode: next };
     }
-    default: return state;
+    default:
+      return state;
   }
 }
 
@@ -696,42 +1192,55 @@ function reducer(state: AppState, action: Action): AppState {
 // ─── CANVAS RENDERER ─────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-interface DragBox { sx: number; sy: number; ex: number; ey: number; }
+interface DragBox {
+  sx: number;
+  sy: number;
+  ex: number;
+  ey: number;
+}
 
 function renderCanvas(
   ctx: CanvasRenderingContext2D,
   state: AppState,
   cam: Camera,
   hoverId: string | null,
-  dragBox: DragBox | null
+  dragBox: DragBox | null,
 ): void {
   const W = ctx.canvas.width / (window.devicePixelRatio || 1);
   const H = ctx.canvas.height / (window.devicePixelRatio || 1);
   const dark = state.darkMode;
 
-  const bg         = dark ? "#0a0c14" : "#ffffff";
-  const gridLine   = dark ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.07)";
-  const gridAccent = dark ? "rgba(255,255,255,.1)"  : "rgba(0,0,0,.18)";
-  const wireCol    = dark ? "#94a3b8" : "#1e293b";
-  const juncCol    = dark ? "#e2e8f0" : "#1e293b";
-  const termAlpha  = dark ? "rgba(96,165,250,.5)" : "rgba(37,99,235,.45)";
+  const bg = dark ? "#0a0c14" : "#ffffff";
+  const gridLine = dark ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.07)";
+  const gridAccent = dark ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.18)";
+  const wireCol = dark ? "#94a3b8" : "#1e293b";
+  const juncCol = dark ? "#e2e8f0" : "#1e293b";
+  const termAlpha = dark ? "rgba(96,165,250,.5)" : "rgba(37,99,235,.45)";
 
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
   if (state.showGrid) {
-    const tl = s2w(0,0,cam), br = s2w(W,H,cam);
-    const startX = Math.floor(tl.x/GRID)*GRID, startY = Math.floor(tl.y/GRID)*GRID;
+    const tl = s2w(0, 0, cam),
+      br = s2w(W, H, cam);
+    const startX = Math.floor(tl.x / GRID) * GRID,
+      startY = Math.floor(tl.y / GRID) * GRID;
     ctx.lineWidth = 0.5;
-    for (let x = startX; x <= br.x+GRID; x += GRID) {
-      ctx.strokeStyle = x%(GRID*5)===0 ? gridAccent : gridLine;
-      const px = x*cam.z+cam.x;
-      ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H); ctx.stroke();
+    for (let x = startX; x <= br.x + GRID; x += GRID) {
+      ctx.strokeStyle = x % (GRID * 5) === 0 ? gridAccent : gridLine;
+      const px = x * cam.z + cam.x;
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, H);
+      ctx.stroke();
     }
-    for (let y = startY; y <= br.y+GRID; y += GRID) {
-      ctx.strokeStyle = y%(GRID*5)===0 ? gridAccent : gridLine;
-      const py = y*cam.z+cam.y;
-      ctx.beginPath(); ctx.moveTo(0,py); ctx.lineTo(W,py); ctx.stroke();
+    for (let y = startY; y <= br.y + GRID; y += GRID) {
+      ctx.strokeStyle = y % (GRID * 5) === 0 ? gridAccent : gridLine;
+      const py = y * cam.z + cam.y;
+      ctx.beginPath();
+      ctx.moveTo(0, py);
+      ctx.lineTo(W, py);
+      ctx.stroke();
     }
   }
 
@@ -740,11 +1249,12 @@ function renderCanvas(
     const hov = hoverId === wire.id;
     ctx.strokeStyle = sel ? colSel : hov ? colHov : wireCol;
     ctx.lineWidth = sel || hov ? 2.5 : 1.8;
-    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
     ctx.beginPath();
-    const pts = wire.points.map(p => w2s(p.x,p.y,cam));
+    const pts = wire.points.map((p) => w2s(p.x, p.y, cam));
     ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i=1; i<pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
 
@@ -753,79 +1263,129 @@ function renderCanvas(
     if (!def) continue;
     const sel = state.selection.includes(comp.id);
     const hov = hoverId === comp.id;
-    const sp  = w2s(comp.position.x, comp.position.y, cam);
+    const sp = w2s(comp.position.x, comp.position.y, cam);
 
     if (sel) {
-      const ts   = termWorlds(comp);
-      const allX = [comp.position.x, ...ts.map(t=>t.x)];
-      const allY = [comp.position.y, ...ts.map(t=>t.y)];
-      const pad  = GRID;
-      const tl   = w2s(Math.min(...allX)-pad, Math.min(...allY)-pad, cam);
-      const br   = w2s(Math.max(...allX)+pad, Math.max(...allY)+pad, cam);
-      ctx.strokeStyle = "rgba(37,99,235,.35)"; ctx.lineWidth = 1; ctx.setLineDash([4,3]);
-      ctx.strokeRect(tl.x, tl.y, br.x-tl.x, br.y-tl.y); ctx.setLineDash([]);
+      const ts = termWorlds(comp);
+      const allX = [comp.position.x, ...ts.map((t) => t.x)];
+      const allY = [comp.position.y, ...ts.map((t) => t.y)];
+      const pad = GRID;
+      const tl = w2s(Math.min(...allX) - pad, Math.min(...allY) - pad, cam);
+      const br = w2s(Math.max(...allX) + pad, Math.max(...allY) + pad, cam);
+      ctx.strokeStyle = "rgba(37,99,235,.35)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+      ctx.setLineDash([]);
     }
 
     ctx.save();
     ctx.translate(sp.x, sp.y);
-    ctx.rotate((comp.rotation*Math.PI)/180);
+    ctx.rotate((comp.rotation * Math.PI) / 180);
     ctx.scale(cam.z, cam.z);
     def.draw(ctx, comp, sel, hov);
     ctx.restore();
 
     for (const t of termWorlds(comp)) {
       const ts = w2s(t.x, t.y, cam);
-      ctx.beginPath(); ctx.arc(ts.x, ts.y, 3.5, 0, Math.PI*2);
-      ctx.fillStyle = sel ? "rgba(37,99,235,.8)" : hov ? "rgba(124,58,237,.6)" : termAlpha;
+      ctx.beginPath();
+      ctx.arc(ts.x, ts.y, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = sel
+        ? "rgba(37,99,235,.8)"
+        : hov
+          ? "rgba(124,58,237,.6)"
+          : termAlpha;
       ctx.fill();
     }
   }
 
   for (const j of findJunctions(state.components, state.wires)) {
     const js = w2s(j.x, j.y, cam);
-    ctx.beginPath(); ctx.arc(js.x, js.y, 4.5*cam.z, 0, Math.PI*2);
-    ctx.fillStyle = juncCol; ctx.fill();
+    ctx.beginPath();
+    ctx.arc(js.x, js.y, 4.5 * cam.z, 0, Math.PI * 2);
+    ctx.fillStyle = juncCol;
+    ctx.fill();
   }
 
   if (state.tool === "wire" && state.wirePoints.length > 0) {
     const endPt = snapToNearby(state.components, state.wires, state.mouseWorld);
     const chain = [...state.wirePoints, endPt];
-    ctx.strokeStyle = "rgba(37,99,235,.75)"; ctx.lineWidth = 2; ctx.setLineDash([6,4]); ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(37,99,235,.75)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.lineCap = "round";
     ctx.beginPath();
     let first = true;
-    for (let i=0; i<chain.length-1; i++) {
-      const seg = orthoRoute(chain[i], chain[i+1]);
-      for (let j=0; j<seg.length; j++) {
+    for (let i = 0; i < chain.length - 1; i++) {
+      const seg = orthoRoute(chain[i], chain[i + 1]);
+      for (let j = 0; j < seg.length; j++) {
         const sp = w2s(seg[j].x, seg[j].y, cam);
-        if (j===0 && first) { ctx.moveTo(sp.x,sp.y); first=false; } else ctx.lineTo(sp.x,sp.y);
+        if (j === 0 && first) {
+          ctx.moveTo(sp.x, sp.y);
+          first = false;
+        } else ctx.lineTo(sp.x, sp.y);
       }
     }
-    ctx.stroke(); ctx.setLineDash([]);
+    ctx.stroke();
+    ctx.setLineDash([]);
     const fs = w2s(state.wirePoints[0].x, state.wirePoints[0].y, cam);
-    ctx.beginPath(); ctx.arc(fs.x,fs.y,5,0,Math.PI*2); ctx.fillStyle=colSel; ctx.fill();
-    const ep = w2s(endPt.x,endPt.y,cam);
-    ctx.beginPath(); ctx.arc(ep.x,ep.y,4,0,Math.PI*2); ctx.fillStyle="rgba(37,99,235,.55)"; ctx.fill();
+    ctx.beginPath();
+    ctx.arc(fs.x, fs.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = colSel;
+    ctx.fill();
+    const ep = w2s(endPt.x, endPt.y, cam);
+    ctx.beginPath();
+    ctx.arc(ep.x, ep.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(37,99,235,.55)";
+    ctx.fill();
   }
 
   if (state.tool === "place" && state.ghostPos && state.placingType) {
     const def = COMPONENT_DEFS[state.placingType];
-    const sp  = w2s(state.ghostPos.x, state.ghostPos.y, cam);
+    const sp = w2s(state.ghostPos.x, state.ghostPos.y, cam);
     ctx.save();
-    ctx.translate(sp.x,sp.y); ctx.rotate((state.ghostRot*Math.PI)/180); ctx.scale(cam.z,cam.z);
+    ctx.translate(sp.x, sp.y);
+    ctx.rotate((state.ghostRot * Math.PI) / 180);
+    ctx.scale(cam.z, cam.z);
     ctx.globalAlpha = 0.45;
-    def.draw(ctx, { id:"__ghost__", type:state.placingType, position:{x:0,y:0}, rotation:0, props:def.defaultProps }, false, false);
-    ctx.globalAlpha = 1; ctx.restore();
-    ctx.strokeStyle = "rgba(37,99,235,.18)"; ctx.lineWidth = 0.5;
-    ctx.beginPath(); ctx.moveTo(sp.x,0); ctx.lineTo(sp.x,H); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0,sp.y); ctx.lineTo(W,sp.y); ctx.stroke();
+    def.draw(
+      ctx,
+      {
+        id: "__ghost__",
+        type: state.placingType,
+        position: { x: 0, y: 0 },
+        rotation: 0,
+        props: def.defaultProps,
+      },
+      false,
+      false,
+    );
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    ctx.strokeStyle = "rgba(37,99,235,.18)";
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(sp.x, 0);
+    ctx.lineTo(sp.x, H);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, sp.y);
+    ctx.lineTo(W, sp.y);
+    ctx.stroke();
   }
 
   if (dragBox) {
-    const x=Math.min(dragBox.sx,dragBox.ex), y=Math.min(dragBox.sy,dragBox.ey);
-    const w=Math.abs(dragBox.ex-dragBox.sx), h=Math.abs(dragBox.ey-dragBox.sy);
-    ctx.fillStyle   = "rgba(37,99,235,.07)"; ctx.fillRect(x,y,w,h);
-    ctx.strokeStyle = "rgba(37,99,235,.5)";  ctx.lineWidth=1; ctx.setLineDash([4,3]);
-    ctx.strokeRect(x,y,w,h); ctx.setLineDash([]);
+    const x = Math.min(dragBox.sx, dragBox.ex),
+      y = Math.min(dragBox.sy, dragBox.ey);
+    const w = Math.abs(dragBox.ex - dragBox.sx),
+      h = Math.abs(dragBox.ey - dragBox.sy);
+    ctx.fillStyle = "rgba(37,99,235,.07)";
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "rgba(37,99,235,.5)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
   }
 }
 
@@ -839,68 +1399,143 @@ interface ComponentPropertyRendererProps {
   dispatch: React.Dispatch<Action>;
 }
 
-function ComponentPropertyRenderer({ comp, dark, dispatch }: ComponentPropertyRendererProps) {
-  const schema  = PROP_SCHEMAS[comp.type];
+function ComponentPropertyRenderer({
+  comp,
+  dark,
+  dispatch,
+}: ComponentPropertyRendererProps) {
+  const schema = PROP_SCHEMAS[comp.type];
   const entries = Object.entries(schema);
 
   const textMuted = dark ? "#64748b" : "#6b7280";
   const inputBase: React.CSSProperties = {
-    width: "100%", padding: "5px 8px", fontSize: 12,
-    fontFamily: "'JetBrains Mono',monospace", borderRadius: 5,
+    width: "100%",
+    padding: "5px 8px",
+    fontSize: 12,
+    fontFamily: "'JetBrains Mono',monospace",
+    borderRadius: 5,
     border: dark ? "1px solid #1e293b" : "1px solid #d1d5db",
     background: dark ? "#0f172a" : "#f9fafb",
     color: dark ? "#e2e8f0" : "#111827",
-    outline: "none", boxSizing: "border-box",
+    outline: "none",
+    boxSizing: "border-box",
   };
 
   if (entries.length === 0) {
-    return <p style={{ fontSize:11, color:textMuted, fontFamily:"monospace" }}>{UI.noProps}</p>;
+    return (
+      <p style={{ fontSize: 11, color: textMuted, fontFamily: "monospace" }}>
+        {UI.noProps}
+      </p>
+    );
   }
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {entries.map(([key, field]) => {
         const value = comp.props[key];
         return (
-          <div key={key} style={{ display:"flex", flexDirection:"column", gap:3 }}>
-            <label style={{ fontSize:10, fontFamily:"monospace", letterSpacing:"0.05em", color:textMuted }}>
+          <div
+            key={key}
+            style={{ display: "flex", flexDirection: "column", gap: 3 }}
+          >
+            <label
+              style={{
+                fontSize: 10,
+                fontFamily: "monospace",
+                letterSpacing: "0.05em",
+                color: textMuted,
+              }}
+            >
               {field.label}
             </label>
 
             {field.type === "boolean" ? (
-              <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                }}
+              >
                 <div
                   role="checkbox"
                   aria-checked={value as boolean}
                   tabIndex={0}
-                  onClick={() => dispatch({ type:"UPDATE_PROP", id:comp.id, key, value:!(value as boolean) })}
-                  onKeyDown={e => { if (e.key===" "||e.key==="Enter") dispatch({ type:"UPDATE_PROP", id:comp.id, key, value:!(value as boolean) }); }}
+                  onClick={() =>
+                    dispatch({
+                      type: "UPDATE_PROP",
+                      id: comp.id,
+                      key,
+                      value: !(value as boolean),
+                    })
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === " " || e.key === "Enter")
+                      dispatch({
+                        type: "UPDATE_PROP",
+                        id: comp.id,
+                        key,
+                        value: !(value as boolean),
+                      });
+                  }}
                   style={{
-                    width:36, height:20, borderRadius:10, position:"relative", cursor:"pointer", flexShrink:0,
-                    background: value ? "#2563eb" : (dark ? "#334155" : "#d1d5db"),
-                    transition:"background .15s",
+                    width: 36,
+                    height: 20,
+                    borderRadius: 10,
+                    position: "relative",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                    background: value
+                      ? "#2563eb"
+                      : dark
+                        ? "#334155"
+                        : "#d1d5db",
+                    transition: "background .15s",
                   }}
                 >
-                  <div style={{
-                    position:"absolute", top:3, left: value ? 18 : 3,
-                    width:14, height:14, borderRadius:"50%", background:"#fff",
-                    transition:"left .15s",
-                  }} />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 3,
+                      left: value ? 18 : 3,
+                      width: 14,
+                      height: 14,
+                      borderRadius: "50%",
+                      background: "#fff",
+                      transition: "left .15s",
+                    }}
+                  />
                 </div>
-                <span style={{ fontSize:12, fontFamily:"monospace", color:dark?"#94a3b8":"#374151" }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontFamily: "monospace",
+                    color: dark ? "#94a3b8" : "#374151",
+                  }}
+                >
                   {value ? UI.closed : UI.open}
                 </span>
               </label>
-
             ) : field.type === "select" ? (
               <select
                 value={value as string}
-                onChange={e => dispatch({ type:"UPDATE_PROP", id:comp.id, key, value:e.target.value })}
+                onChange={(e) =>
+                  dispatch({
+                    type: "UPDATE_PROP",
+                    id: comp.id,
+                    key,
+                    value: e.target.value,
+                  })
+                }
                 style={inputBase}
               >
-                {(field as SelectField).options.map(o => <option key={o} value={o}>{o}</option>)}
+                {(field as SelectField).options.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
               </select>
-
             ) : (
               <input
                 type="number"
@@ -908,7 +1543,14 @@ function ComponentPropertyRenderer({ comp, dark, dispatch }: ComponentPropertyRe
                 min={(field as NumberField).min}
                 step={(field as NumberField).step}
                 style={inputBase}
-                onChange={e => dispatch({ type:"UPDATE_PROP", id:comp.id, key, value:parseFloat(e.target.value)||0 })}
+                onChange={(e) =>
+                  dispatch({
+                    type: "UPDATE_PROP",
+                    id: comp.id,
+                    key,
+                    value: parseFloat(e.target.value) || 0,
+                  })
+                }
               />
             )}
           </div>
@@ -930,26 +1572,49 @@ interface ComponentPopoverProps {
   dispatch: React.Dispatch<Action>;
 }
 
-function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: ComponentPopoverProps) {
+function ComponentPopover({
+  comp,
+  anchorScreen,
+  canvasRect,
+  dark,
+  dispatch,
+}: ComponentPopoverProps) {
   const open = comp !== null && anchorScreen !== null;
-  const def  = comp ? COMPONENT_DEFS[comp.type] : null;
+  const def = comp ? COMPONENT_DEFS[comp.type] : null;
 
-  const absAnchor = anchorScreen && canvasRect
-    ? {
-        x: Math.max(8, Math.min(window.innerWidth  - 8, canvasRect.left + anchorScreen.x)),
-        y: Math.max(8, Math.min(window.innerHeight - 8, canvasRect.top  + anchorScreen.y)),
-      }
-    : null;
+  const absAnchor =
+    anchorScreen && canvasRect
+      ? {
+          x: Math.max(
+            8,
+            Math.min(window.innerWidth - 8, canvasRect.left + anchorScreen.x),
+          ),
+          y: Math.max(
+            8,
+            Math.min(window.innerHeight - 8, canvasRect.top + anchorScreen.y),
+          ),
+        }
+      : null;
 
-  const popBg   = dark ? "#0f172a" : "#ffffff";
-  const border  = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
-  const shadow  = dark ? "0 8px 32px rgba(0,0,0,.6)" : "0 4px 24px rgba(0,0,0,.12)";
+  const popBg = dark ? "#0f172a" : "#ffffff";
+  const border = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const shadow = dark
+    ? "0 8px 32px rgba(0,0,0,.6)"
+    : "0 4px 24px rgba(0,0,0,.12)";
   const textPri = dark ? "#e2e8f0" : "#111827";
   const textMut = dark ? "#64748b" : "#6b7280";
   const actBase: React.CSSProperties = {
-    width:"100%", background:"transparent", border, color:textMut,
-    borderRadius:5, padding:"5px 8px", fontSize:11,
-    fontFamily:"'JetBrains Mono',monospace", cursor:"pointer", textAlign:"left", marginBottom:4,
+    width: "100%",
+    background: "transparent",
+    border,
+    color: textMut,
+    borderRadius: 5,
+    padding: "5px 8px",
+    fontSize: 11,
+    fontFamily: "'JetBrains Mono',monospace",
+    cursor: "pointer",
+    textAlign: "left",
+    marginBottom: 4,
   };
 
   return (
@@ -958,8 +1623,9 @@ function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: Co
         style={{
           position: "fixed",
           left: absAnchor?.x ?? 0,
-          top:  absAnchor?.y ?? 0,
-          width: 0, height: 0,
+          top: absAnchor?.y ?? 0,
+          width: 0,
+          height: 0,
           pointerEvents: "none",
         }}
       />
@@ -971,49 +1637,105 @@ function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: Co
           align="center"
           avoidCollisions
           collisionPadding={12}
-          onOpenAutoFocus={e => e.preventDefault()}
-          onInteractOutside={() => dispatch({ type:"SELECT", ids:[] })}
-          onEscapeKeyDown={()   => dispatch({ type:"SELECT", ids:[] })}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onInteractOutside={() => dispatch({ type: "SELECT", ids: [] })}
+          onEscapeKeyDown={() => dispatch({ type: "SELECT", ids: [] })}
           style={{
-            width: 224, background: popBg, border, borderRadius: 10,
-            boxShadow: shadow, padding: 14,
-            display: "flex", flexDirection: "column", gap: 10,
-            zIndex: 1000, fontFamily: "'JetBrains Mono',monospace",
+            width: 224,
+            background: popBg,
+            border,
+            borderRadius: 10,
+            boxShadow: shadow,
+            padding: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            zIndex: 1000,
+            fontFamily: "'JetBrains Mono',monospace",
           }}
         >
           {comp && def && (
             <>
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
-                <span style={{
-                  display:"inline-flex", alignItems:"center", justifyContent:"center",
-                  width:26, height:26, borderRadius:6,
-                  background:`${def.color}20`, color:def.color,
-                  fontSize:10, fontWeight:700,
-                }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 2,
+                }}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 26,
+                    height: 26,
+                    borderRadius: 6,
+                    background: `${def.color}20`,
+                    color: def.color,
+                    fontSize: 10,
+                    fontWeight: 700,
+                  }}
+                >
                   {def.symbol}
                 </span>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:textPri }}>{def.label}</div>
-                  <div style={{ fontSize:9, color:textMut }}>{comp.id}</div>
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{ fontSize: 13, fontWeight: 600, color: textPri }}
+                  >
+                    {def.label}
+                  </div>
+                  <div style={{ fontSize: 9, color: textMut }}>{comp.id}</div>
                 </div>
                 <PopoverPrimitive.Close
-                  onClick={() => dispatch({ type:"SELECT", ids:[] })}
+                  onClick={() => dispatch({ type: "SELECT", ids: [] })}
                   aria-label="Fermer"
-                  style={{ background:"transparent", border:"none", color:textMut, cursor:"pointer", fontSize:16, lineHeight:1, padding:"2px 4px", borderRadius:3 }}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: textMut,
+                    cursor: "pointer",
+                    fontSize: 16,
+                    lineHeight: 1,
+                    padding: "2px 4px",
+                    borderRadius: 3,
+                  }}
                 >
                   ×
                 </PopoverPrimitive.Close>
               </div>
 
-              <div style={{ fontSize:9.5, color:textMut, lineHeight:1.8 }}>
-                pos ({Math.round(comp.position.x)}, {Math.round(comp.position.y)}) · rot {comp.rotation}°
+              <div style={{ fontSize: 9.5, color: textMut, lineHeight: 1.8 }}>
+                pos ({Math.round(comp.position.x)},{" "}
+                {Math.round(comp.position.y)}) · rot {comp.rotation}°
               </div>
 
-              <ComponentPropertyRenderer comp={comp} dark={dark} dispatch={dispatch} />
+              <ComponentPropertyRenderer
+                comp={comp}
+                dark={dark}
+                dispatch={dispatch}
+              />
 
-              <div style={{ borderTop: dark?"1px solid #1e293b":"1px solid #e5e7eb", paddingTop:8, marginTop:2 }}>
-                <button style={actBase} onClick={() => dispatch({ type:"ROTATE_SELECTED" })}>{UI.rotate}</button>
-                <button style={{ ...actBase, color:"#dc2626", marginBottom:0 }} onClick={() => dispatch({ type:"DELETE_SELECTED" })}>{UI.deleteComp}</button>
+              <div
+                style={{
+                  borderTop: dark ? "1px solid #1e293b" : "1px solid #e5e7eb",
+                  paddingTop: 8,
+                  marginTop: 2,
+                }}
+              >
+                <button
+                  style={actBase}
+                  onClick={() => dispatch({ type: "ROTATE_SELECTED" })}
+                >
+                  {UI.rotate}
+                </button>
+                <button
+                  style={{ ...actBase, color: "#dc2626", marginBottom: 0 }}
+                  onClick={() => dispatch({ type: "DELETE_SELECTED" })}
+                >
+                  {UI.deleteComp}
+                </button>
               </div>
             </>
           )}
@@ -1027,59 +1749,171 @@ function ComponentPopover({ comp, anchorScreen, canvasRect, dark, dispatch }: Co
 // ─── NETLIST MODAL ────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-interface NetlistModalProps { circuit: Circuit; dark: boolean; onClose: () => void; }
+interface NetlistModalProps {
+  circuit: Circuit;
+  dark: boolean;
+  onClose: () => void;
+}
 
 function NetlistModal({ circuit, dark, onClose }: NetlistModalProps) {
   const netlist = generateNetlist(circuit);
-  const text    = netlistToString(netlist);
+  const text = netlistToString(netlist);
   const [copied, setCopied] = useState(false);
 
-  const copy = () => navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); });
+  const copy = () =>
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
 
-  const bg     = dark ? "#0f172a" : "#ffffff";
+  const bg = dark ? "#0f172a" : "#ffffff";
   const border = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
-  const textPri= dark ? "#e2e8f0" : "#111827";
-  const textMut= dark ? "#64748b" : "#6b7280";
+  const textPri = dark ? "#e2e8f0" : "#111827";
+  const textMut = dark ? "#64748b" : "#6b7280";
   const codeBg = dark ? "#080a12" : "#f9fafb";
 
   return (
     <div
-      style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(0,0,0,.45)", display:"flex", alignItems:"center", justifyContent:"center" }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 2000,
+        background: "rgba(0,0,0,.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
       onClick={onClose}
     >
       <div
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
         style={{
-          width:560, maxHeight:"80vh", background:bg, borderRadius:12, border,
-          boxShadow:"0 16px 48px rgba(0,0,0,.25)", display:"flex", flexDirection:"column",
-          overflow:"hidden", fontFamily:"'JetBrains Mono',monospace",
+          width: 560,
+          maxHeight: "80vh",
+          background: bg,
+          borderRadius: 12,
+          border,
+          boxShadow: "0 16px 48px rgba(0,0,0,.25)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          fontFamily: "'JetBrains Mono',monospace",
         }}
       >
-        <div style={{ padding:"13px 16px", borderBottom:border, display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ fontSize:13, fontWeight:600, color:textPri }}>{UI.netlistTitle}</span>
-          <div style={{ flex:1 }} />
+        <div
+          style={{
+            padding: "13px 16px",
+            borderBottom: border,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: textPri }}>
+            {UI.netlistTitle}
+          </span>
+          <div style={{ flex: 1 }} />
           {netlist.warnings.length > 0 && (
-            <span style={{ fontSize:10, color:"#b45309", background:"#fef3c7", borderRadius:4, padding:"2px 8px" }}>
+            <span
+              style={{
+                fontSize: 10,
+                color: "#b45309",
+                background: "#fef3c7",
+                borderRadius: 4,
+                padding: "2px 8px",
+              }}
+            >
               {UI.warnings(netlist.warnings.length)}
             </span>
           )}
-          <button onClick={copy}    style={{ fontSize:11, color:copied?"#15803d":"#2563eb", background:"transparent", border:"none", cursor:"pointer" }}>{copied ? UI.copied : UI.copy}</button>
-          <button onClick={onClose} style={{ fontSize:16, color:textMut, background:"transparent", border:"none", cursor:"pointer", lineHeight:1 }}>×</button>
+          <button
+            onClick={copy}
+            style={{
+              fontSize: 11,
+              color: copied ? "#15803d" : "#2563eb",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            {copied ? UI.copied : UI.copy}
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              fontSize: 16,
+              color: textMut,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
         </div>
 
-        <div style={{ padding:"8px 16px", borderBottom:border, display:"flex", gap:14, flexWrap:"wrap" }}>
-          <span style={{ fontSize:10, color:textMut }}>{UI.nodes} <strong style={{ color:textPri }}>{netlist.nodes.join(", ")||"—"}</strong></span>
-          <span style={{ fontSize:10, color:textMut }}>{UI.elements} <strong style={{ color:textPri }}>{netlist.components.length}</strong></span>
+        <div
+          style={{
+            padding: "8px 16px",
+            borderBottom: border,
+            display: "flex",
+            gap: 14,
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ fontSize: 10, color: textMut }}>
+            {UI.nodes}{" "}
+            <strong style={{ color: textPri }}>
+              {netlist.nodes.join(", ") || "—"}
+            </strong>
+          </span>
+          <span style={{ fontSize: 10, color: textMut }}>
+            {UI.elements}{" "}
+            <strong style={{ color: textPri }}>
+              {netlist.components.length}
+            </strong>
+          </span>
         </div>
 
-        <pre style={{ flex:1, overflowY:"auto", margin:0, padding:"12px 16px", fontSize:12, lineHeight:1.9, color:textPri, background:codeBg, whiteSpace:"pre-wrap", wordBreak:"break-all" }}>
+        <pre
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            margin: 0,
+            padding: "12px 16px",
+            fontSize: 12,
+            lineHeight: 1.9,
+            color: textPri,
+            background: codeBg,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}
+        >
           {text || UI.emptyCircuit}
         </pre>
 
         {netlist.warnings.length > 0 && (
-          <div style={{ padding:"10px 16px", borderTop:border, display:"flex", flexDirection:"column", gap:4 }}>
-            {netlist.warnings.map((w,i) => (
-              <div key={i} style={{ fontSize:10, color:"#b45309", fontFamily:"monospace" }}>⚠ {w}</div>
+          <div
+            style={{
+              padding: "10px 16px",
+              borderTop: border,
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            {netlist.warnings.map((w, i) => (
+              <div
+                key={i}
+                style={{
+                  fontSize: 10,
+                  color: "#b45309",
+                  fontFamily: "monospace",
+                }}
+              >
+                ⚠ {w}
+              </div>
             ))}
           </div>
         )}
@@ -1092,8 +1926,16 @@ function NetlistModal({ circuit, dark, onClose }: NetlistModalProps) {
 // ─── CIRCUIT CANVAS ───────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-interface MoveDrag { type:"move"; startWorld:Vec2; lastDx:number; lastDy:number; }
-interface BoxDrag  { type:"box";  startScreen:Vec2; }
+interface MoveDrag {
+  type: "move";
+  startWorld: Vec2;
+  lastDx: number;
+  lastDy: number;
+}
+interface BoxDrag {
+  type: "box";
+  startScreen: Vec2;
+}
 type DragState = MoveDrag | BoxDrag;
 
 interface CircuitCanvasProps {
@@ -1104,174 +1946,300 @@ interface CircuitCanvasProps {
   onComponentClick: (compId: string, canvasRelativeScreen: Vec2) => void;
 }
 
-function CircuitCanvas({ state, dispatch, cam, setCam, onComponentClick }: CircuitCanvasProps) {
+function CircuitCanvas({
+  state,
+  dispatch,
+  cam,
+  setCam,
+  onComponentClick,
+}: CircuitCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [hoverId, setHoverId] = useState<string|null>(null);
-  const [dragBox, setDragBox] = useState<DragBox|null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [dragBox, setDragBox] = useState<DragBox | null>(null);
 
-  const dragRef  = useRef<DragState|null>(null);
-  const panRef   = useRef<{ lx:number; ly:number }|null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const panRef = useRef<{ lx: number; ly: number } | null>(null);
   const stateRef = useRef(state);
-  const camRef   = useRef(cam);
+  const camRef = useRef(cam);
   stateRef.current = state;
-  camRef.current   = cam;
+  camRef.current = cam;
 
   useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const resize = () => {
-      const dpr = window.devicePixelRatio||1;
-      canvas.width  = canvas.offsetWidth  * dpr;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = canvas.offsetWidth * dpr;
       canvas.height = canvas.offsetHeight * dpr;
-      canvas.getContext("2d")!.scale(dpr,dpr);
+      canvas.getContext("2d")!.scale(dpr, dpr);
     };
-    const ro = new ResizeObserver(resize); ro.observe(canvas); resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+    resize();
     return () => ro.disconnect();
   }, []);
 
   useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     renderCanvas(ctx, state, cam, hoverId, dragBox);
   });
 
-  const getWorld  = useCallback((e:React.MouseEvent): Vec2 => {
+  const getWorld = useCallback((e: React.MouseEvent): Vec2 => {
     const r = canvasRef.current!.getBoundingClientRect();
-    return s2w(e.clientX-r.left, e.clientY-r.top, camRef.current);
+    return s2w(e.clientX - r.left, e.clientY - r.top, camRef.current);
   }, []);
-  const getScreen = useCallback((e:React.MouseEvent): Vec2 => {
+  const getScreen = useCallback((e: React.MouseEvent): Vec2 => {
     const r = canvasRef.current!.getBoundingClientRect();
-    return { x: e.clientX-r.left, y: e.clientY-r.top };
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
   }, []);
 
-  const onWheel = useCallback((e:WheelEvent) => {
-    e.preventDefault();
-    const r = canvasRef.current!.getBoundingClientRect();
-    const sx = e.clientX-r.left, sy = e.clientY-r.top;
-    const f  = e.deltaY < 0 ? 1.12 : 1/1.12;
-    setCam(c => { const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, c.z*f)); return { x:sx-(sx-c.x)*(z/c.z), y:sy-(sy-c.y)*(z/c.z), z }; });
-  }, [setCam]);
+  const onWheel = useCallback(
+    (e: WheelEvent) => {
+      e.preventDefault();
+      const r = canvasRef.current!.getBoundingClientRect();
+      const sx = e.clientX - r.left,
+        sy = e.clientY - r.top;
+      const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      setCam((c) => {
+        const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, c.z * f));
+        return {
+          x: sx - (sx - c.x) * (z / c.z),
+          y: sy - (sy - c.y) * (z / c.z),
+          z,
+        };
+      });
+    },
+    [setCam],
+  );
   useEffect(() => {
-    const el = canvasRef.current; if (!el) return;
-    el.addEventListener("wheel", onWheel, { passive:false });
+    const el = canvasRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [onWheel]);
 
-  const onMouseMove = useCallback((e:React.MouseEvent) => {
-    const world  = getWorld(e);
-    const screen = getScreen(e);
-    dispatch({ type:"SET_MOUSE", pos:world });
+  const onMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      const world = getWorld(e);
+      const screen = getScreen(e);
+      dispatch({ type: "SET_MOUSE", pos: world });
 
-    if (panRef.current) {
-      setCam(c => ({ ...c, x:c.x+e.clientX-panRef.current!.lx, y:c.y+e.clientY-panRef.current!.ly }));
-      panRef.current = { lx:e.clientX, ly:e.clientY }; return;
-    }
-    const st = stateRef.current;
-    if (st.tool === "place") dispatch({ type:"SET_GHOST", pos:snapToNearby(st.components,st.wires,world) });
+      if (panRef.current) {
+        setCam((c) => ({
+          ...c,
+          x: c.x + e.clientX - panRef.current!.lx,
+          y: c.y + e.clientY - panRef.current!.ly,
+        }));
+        panRef.current = { lx: e.clientX, ly: e.clientY };
+        return;
+      }
+      const st = stateRef.current;
+      if (st.tool === "place")
+        dispatch({
+          type: "SET_GHOST",
+          pos: snapToNearby(st.components, st.wires, world),
+        });
 
-    if (dragRef.current?.type === "move") {
-      const dr = dragRef.current as MoveDrag;
-      const dx = world.x-dr.startWorld.x, dy = world.y-dr.startWorld.y;
-      const sdx = snap(dx)-dr.lastDx, sdy = snap(dy)-dr.lastDy;
-      if (sdx!==0||sdy!==0) { dispatch({ type:"MOVE_SELECTION", dx:sdx, dy:sdy }); dr.lastDx+=sdx; dr.lastDy+=sdy; }
-      return;
-    }
-    if (dragRef.current?.type === "box") {
-      const dr = dragRef.current as BoxDrag;
-      setDragBox({ sx:dr.startScreen.x, sy:dr.startScreen.y, ex:screen.x, ey:screen.y });
-      const c2 = camRef.current;
-      const tl = s2w(Math.min(dr.startScreen.x,screen.x), Math.min(dr.startScreen.y,screen.y), c2);
-      const br = s2w(Math.max(dr.startScreen.x,screen.x), Math.max(dr.startScreen.y,screen.y), c2);
-      const ids = st.components.filter(c => c.position.x>=tl.x&&c.position.x<=br.x&&c.position.y>=tl.y&&c.position.y<=br.y).map(c=>c.id);
-      dispatch({ type:"SELECT", ids }); return;
-    }
-    setHoverId(hitTest(st.components, st.wires, world));
-  }, [dispatch, getWorld, getScreen, setCam]);
-
-  const onMouseDown = useCallback((e:React.MouseEvent) => {
-    e.preventDefault();
-    if (e.button===1||(e.button===0&&e.altKey)) { panRef.current={lx:e.clientX,ly:e.clientY}; return; }
-    if (e.button!==0) return;
-
-    const world  = getWorld(e);
-    const screen = getScreen(e);
-    const st     = stateRef.current;
-
-    if (st.tool==="place"&&st.ghostPos&&st.placingType) {
-      const def = COMPONENT_DEFS[st.placingType];
-      dispatch({ type:"ADD_COMPONENT", comp:{ id:uid(), type:st.placingType, position:{...st.ghostPos}, rotation:st.ghostRot, props:JSON.parse(JSON.stringify(def.defaultProps)) } });
-      return;
-    }
-
-    if (st.tool==="wire") {
-      const pt = snapToNearby(st.components,st.wires,world);
-      if (e.detail===2) {
-        if (st.wirePoints.length>=1) {
-          const chain = [...st.wirePoints, pt];
-          const wirePts: Vec2[] = [];
-          for (let i=0; i<chain.length-1; i++) wirePts.push(...orthoRoute(chain[i],chain[i+1]).slice(0,-1));
-          wirePts.push(chain[chain.length-1]);
-          if (wirePts.length>=2) dispatch({ type:"ADD_WIRE", wire:{ id:uid(), points:wirePts } });
+      if (dragRef.current?.type === "move") {
+        const dr = dragRef.current as MoveDrag;
+        const dx = world.x - dr.startWorld.x,
+          dy = world.y - dr.startWorld.y;
+        const sdx = snap(dx) - dr.lastDx,
+          sdy = snap(dy) - dr.lastDy;
+        if (sdx !== 0 || sdy !== 0) {
+          dispatch({ type: "MOVE_SELECTION", dx: sdx, dy: sdy });
+          dr.lastDx += sdx;
+          dr.lastDy += sdy;
         }
-        dispatch({ type:"SET_WIRE_POINTS", pts:[] }); return;
+        return;
       }
-      dispatch({ type:"SET_WIRE_POINTS", pts:[...st.wirePoints, pt] }); return;
-    }
-
-    if (st.tool==="select") {
-      const hit = hitTest(st.components, st.wires, world);
-      if (hit) {
-        const isComp = st.components.some(c=>c.id===hit);
-        if (!e.shiftKey&&!st.selection.includes(hit)) dispatch({ type:"SELECT", ids:[hit] });
-        else if (e.shiftKey) dispatch({ type:"SELECT", ids: st.selection.includes(hit)?st.selection.filter(x=>x!==hit):[...st.selection,hit] });
-        if (isComp && !e.shiftKey) onComponentClick(hit, screen);
-        dragRef.current = { type:"move", startWorld:world, lastDx:0, lastDy:0 };
-      } else {
-        if (!e.shiftKey) dispatch({ type:"SELECT", ids:[] });
-        dragRef.current = { type:"box", startScreen:screen };
+      if (dragRef.current?.type === "box") {
+        const dr = dragRef.current as BoxDrag;
+        setDragBox({
+          sx: dr.startScreen.x,
+          sy: dr.startScreen.y,
+          ex: screen.x,
+          ey: screen.y,
+        });
+        const c2 = camRef.current;
+        const tl = s2w(
+          Math.min(dr.startScreen.x, screen.x),
+          Math.min(dr.startScreen.y, screen.y),
+          c2,
+        );
+        const br = s2w(
+          Math.max(dr.startScreen.x, screen.x),
+          Math.max(dr.startScreen.y, screen.y),
+          c2,
+        );
+        const ids = st.components
+          .filter(
+            (c) =>
+              c.position.x >= tl.x &&
+              c.position.x <= br.x &&
+              c.position.y >= tl.y &&
+              c.position.y <= br.y,
+          )
+          .map((c) => c.id);
+        dispatch({ type: "SELECT", ids });
+        return;
       }
-    }
-  }, [dispatch, getWorld, getScreen, onComponentClick]);
+      setHoverId(hitTest(st.components, st.wires, world));
+    },
+    [dispatch, getWorld, getScreen, setCam],
+  );
 
-  const onMouseUp = useCallback(() => { panRef.current=null; dragRef.current=null; setDragBox(null); }, []);
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      if (e.button === 1 || (e.button === 0 && e.altKey)) {
+        panRef.current = { lx: e.clientX, ly: e.clientY };
+        return;
+      }
+      if (e.button !== 0) return;
+
+      const world = getWorld(e);
+      const screen = getScreen(e);
+      const st = stateRef.current;
+
+      if (st.tool === "place" && st.ghostPos && st.placingType) {
+        const def = COMPONENT_DEFS[st.placingType];
+        dispatch({
+          type: "ADD_COMPONENT",
+          comp: {
+            id: uid(),
+            type: st.placingType,
+            position: { ...st.ghostPos },
+            rotation: st.ghostRot,
+            props: JSON.parse(JSON.stringify(def.defaultProps)),
+          },
+        });
+        return;
+      }
+
+      if (st.tool === "wire") {
+        const pt = snapToNearby(st.components, st.wires, world);
+        if (e.detail === 2) {
+          if (st.wirePoints.length >= 1) {
+            const chain = [...st.wirePoints, pt];
+            const wirePts: Vec2[] = [];
+            for (let i = 0; i < chain.length - 1; i++)
+              wirePts.push(...orthoRoute(chain[i], chain[i + 1]).slice(0, -1));
+            wirePts.push(chain[chain.length - 1]);
+            if (wirePts.length >= 2)
+              dispatch({
+                type: "ADD_WIRE",
+                wire: { id: uid(), points: wirePts },
+              });
+          }
+          dispatch({ type: "SET_WIRE_POINTS", pts: [] });
+          return;
+        }
+        dispatch({ type: "SET_WIRE_POINTS", pts: [...st.wirePoints, pt] });
+        return;
+      }
+
+      if (st.tool === "select") {
+        const hit = hitTest(st.components, st.wires, world);
+        if (hit) {
+          const isComp = st.components.some((c) => c.id === hit);
+          if (!e.shiftKey && !st.selection.includes(hit))
+            dispatch({ type: "SELECT", ids: [hit] });
+          else if (e.shiftKey)
+            dispatch({
+              type: "SELECT",
+              ids: st.selection.includes(hit)
+                ? st.selection.filter((x) => x !== hit)
+                : [...st.selection, hit],
+            });
+          if (isComp && !e.shiftKey) onComponentClick(hit, screen);
+          dragRef.current = {
+            type: "move",
+            startWorld: world,
+            lastDx: 0,
+            lastDy: 0,
+          };
+        } else {
+          if (!e.shiftKey) dispatch({ type: "SELECT", ids: [] });
+          dragRef.current = { type: "box", startScreen: screen };
+        }
+      }
+    },
+    [dispatch, getWorld, getScreen, onComponentClick],
+  );
+
+  const onMouseUp = useCallback(() => {
+    panRef.current = null;
+    dragRef.current = null;
+    setDragBox(null);
+  }, []);
 
   useEffect(() => {
-    const handler = (e:KeyboardEvent) => {
-      const tag = (document.activeElement as HTMLElement|null)?.tagName;
-      if (tag==="INPUT"||tag==="SELECT"||tag==="TEXTAREA") return;
+    const handler = (e: KeyboardEvent) => {
+      const tag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
       const st = stateRef.current;
-      if (e.key==="Escape") {
-        if (st.tool==="wire") dispatch({ type:"SET_WIRE_POINTS", pts:[] });
-        else if (st.tool==="place") dispatch({ type:"SET_TOOL", tool:"select" });
-        else dispatch({ type:"SELECT", ids:[] });
+      if (e.key === "Escape") {
+        if (st.tool === "wire") dispatch({ type: "SET_WIRE_POINTS", pts: [] });
+        else if (st.tool === "place")
+          dispatch({ type: "SET_TOOL", tool: "select" });
+        else dispatch({ type: "SELECT", ids: [] });
         return;
       }
-      if (e.key==="r"||e.key==="R") {
-        if (st.tool==="place") dispatch({ type:"ROTATE_GHOST" });
-        else if (st.selection.length>0) dispatch({ type:"ROTATE_SELECTED" });
+      if (e.key === "r" || e.key === "R") {
+        if (st.tool === "place") dispatch({ type: "ROTATE_GHOST" });
+        else if (st.selection.length > 0) dispatch({ type: "ROTATE_SELECTED" });
         return;
       }
-      if (e.key==="Delete"||e.key==="Backspace") { if (st.selection.length>0) dispatch({ type:"DELETE_SELECTED" }); return; }
-      if ((e.ctrlKey||e.metaKey)&&e.key==="z") { e.preventDefault(); dispatch({ type:"UNDO" }); return; }
-      if ((e.ctrlKey||e.metaKey)&&(e.key==="y"||e.key==="Y")) { e.preventDefault(); dispatch({ type:"REDO" }); return; }
-      if (e.key==="w"||e.key==="W") dispatch({ type:"SET_TOOL", tool:"wire" });
-      if (e.key==="s"||e.key==="S") dispatch({ type:"SET_TOOL", tool:"select" });
-      if (e.key==="g"||e.key==="G") dispatch({ type:"TOGGLE_GRID" });
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (st.selection.length > 0) dispatch({ type: "DELETE_SELECTED" });
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        dispatch({ type: "UNDO" });
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) {
+        e.preventDefault();
+        dispatch({ type: "REDO" });
+        return;
+      }
+      if (e.key === "w" || e.key === "W")
+        dispatch({ type: "SET_TOOL", tool: "wire" });
+      if (e.key === "s" || e.key === "S")
+        dispatch({ type: "SET_TOOL", tool: "select" });
+      if (e.key === "g" || e.key === "G") dispatch({ type: "TOGGLE_GRID" });
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [dispatch]);
 
-  const cursor = state.tool==="wire" ? "crosshair" : state.tool==="place" ? "none" : "default";
+  const cursor =
+    state.tool === "wire"
+      ? "crosshair"
+      : state.tool === "place"
+        ? "none"
+        : "default";
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ flex:1, display:"block", width:"100%", height:"100%", cursor }}
+      style={{
+        flex: 1,
+        display: "block",
+        width: "100%",
+        height: "100%",
+        cursor,
+      }}
       onMouseMove={onMouseMove}
       onMouseDown={onMouseDown}
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
-      onContextMenu={e => e.preventDefault()}
+      onContextMenu={(e) => e.preventDefault()}
     />
   );
 }
@@ -1280,53 +2248,134 @@ function CircuitCanvas({ state, dispatch, cam, setCam, onComponentClick }: Circu
 // ─── PALETTE ─────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const PALETTE_GROUPS: { label:string; items:ComponentType[] }[] = [
-  { label: UI.passive, items:["resistor","capacitor","inductor"] },
-  { label: UI.sources, items:["vsource","ground"] },
-  { label: UI.active,  items:["switch","led"] },
+const PALETTE_GROUPS: { label: string; items: ComponentType[] }[] = [
+  { label: UI.passive, items: ["resistor", "capacitor", "inductor"] },
+  { label: UI.sources, items: ["vsource", "ground"] },
+  { label: UI.active, items: ["switch", "led"] },
 ];
 
-function Palette({ state, dispatch }: { state:AppState; dispatch:React.Dispatch<Action> }) {
+function Palette({
+  state,
+  dispatch,
+}: {
+  state: AppState;
+  dispatch: React.Dispatch<Action>;
+}) {
   const dark = state.darkMode;
-  const bg   = dark ? "#0e1120" : "#fafafa";
-  const bdr  = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
-  const sec  = dark ? "#374151" : "#9ca3af";
+  const bg = dark ? "#0e1120" : "#fafafa";
+  const bdr = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const sec = dark ? "#374151" : "#9ca3af";
 
-  const btn = (active:boolean): React.CSSProperties => ({
-    width:"100%", textAlign:"left",
-    background: active ? (dark?"#0f1f40":"#eff6ff") : "transparent",
-    border:"none", color: active?"#2563eb":(dark?"#64748b":"#374151"),
-    padding:"5px 8px", borderRadius:5, cursor:"pointer",
-    fontSize:12, fontFamily:"'JetBrains Mono',monospace", fontWeight:active?600:400,
-    display:"flex", alignItems:"center", gap:7,
+  const btn = (active: boolean): React.CSSProperties => ({
+    width: "100%",
+    textAlign: "left",
+    background: active ? (dark ? "#0f1f40" : "#eff6ff") : "transparent",
+    border: "none",
+    color: active ? "#2563eb" : dark ? "#64748b" : "#374151",
+    padding: "5px 8px",
+    borderRadius: 5,
+    cursor: "pointer",
+    fontSize: 12,
+    fontFamily: "'JetBrains Mono',monospace",
+    fontWeight: active ? 600 : 400,
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
   });
-  const ico = (color:string): React.CSSProperties => ({
-    display:"inline-flex", alignItems:"center", justifyContent:"center",
-    width:18, height:18, borderRadius:3,
-    background:`${color}20`, color, fontSize:9, fontWeight:700, flexShrink:0,
+  const ico = (color: string): React.CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 18,
+    height: 18,
+    borderRadius: 3,
+    background: `${color}20`,
+    color,
+    fontSize: 9,
+    fontWeight: 700,
+    flexShrink: 0,
   });
 
   return (
-    <div style={{ width:168, background:bg, borderRight:bdr, display:"flex", flexDirection:"column", padding:"10px 6px", gap:2, overflowY:"auto", flexShrink:0 }}>
-      <div style={{ fontSize:9, letterSpacing:"0.15em", color:sec, fontWeight:700, marginBottom:6, paddingLeft:4, fontFamily:"monospace" }}>{UI.sandboxTitle}</div>
+    <div
+      style={{
+        width: 168,
+        background: bg,
+        borderRight: bdr,
+        display: "flex",
+        flexDirection: "column",
+        padding: "10px 6px",
+        gap: 2,
+        overflowY: "auto",
+        flexShrink: 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          letterSpacing: "0.15em",
+          color: sec,
+          fontWeight: 700,
+          marginBottom: 6,
+          paddingLeft: 4,
+          fontFamily: "monospace",
+        }}
+      >
+        {UI.sandboxTitle}
+      </div>
 
-      <div style={{ fontSize:9, letterSpacing:"0.1em", color:sec, fontWeight:700, margin:"4px 0 3px 4px", fontFamily:"monospace" }}>{UI.toolsHeader}</div>
-      <button style={btn(state.tool==="select")} onClick={() => dispatch({ type:"SET_TOOL", tool:"select" })}>
+      <div
+        style={{
+          fontSize: 9,
+          letterSpacing: "0.1em",
+          color: sec,
+          fontWeight: 700,
+          margin: "4px 0 3px 4px",
+          fontFamily: "monospace",
+        }}
+      >
+        {UI.toolsHeader}
+      </div>
+      <button
+        style={btn(state.tool === "select")}
+        onClick={() => dispatch({ type: "SET_TOOL", tool: "select" })}
+      >
         <span style={ico("#2563eb")}>↖</span> {UI.select}
       </button>
-      <button style={btn(state.tool==="wire")} onClick={() => dispatch({ type:"SET_TOOL", tool:"wire" })}>
+      <button
+        style={btn(state.tool === "wire")}
+        onClick={() => dispatch({ type: "SET_TOOL", tool: "wire" })}
+      >
         <span style={ico("#7c3aed")}>⌐</span> {UI.wire}
       </button>
 
-      {PALETTE_GROUPS.map(g => (
+      {PALETTE_GROUPS.map((g) => (
         <div key={g.label}>
-          <div style={{ fontSize:9, letterSpacing:"0.1em", color:sec, fontWeight:700, margin:"10px 0 3px 4px", fontFamily:"monospace" }}>{g.label}</div>
-          {g.items.map(t => {
-            const def    = COMPONENT_DEFS[t];
-            const active = state.tool==="place"&&state.placingType===t;
+          <div
+            style={{
+              fontSize: 9,
+              letterSpacing: "0.1em",
+              color: sec,
+              fontWeight: 700,
+              margin: "10px 0 3px 4px",
+              fontFamily: "monospace",
+            }}
+          >
+            {g.label}
+          </div>
+          {g.items.map((t) => {
+            const def = COMPONENT_DEFS[t];
+            const active = state.tool === "place" && state.placingType === t;
             return (
-              <button key={t} style={btn(active)} onClick={() => dispatch({ type:"SET_TOOL", tool:"place", placingType:t })}>
-                <span style={ico(def.color)}>{def.symbol}</span>{def.label}
+              <button
+                key={t}
+                style={btn(active)}
+                onClick={() =>
+                  dispatch({ type: "SET_TOOL", tool: "place", placingType: t })
+                }
+              >
+                <span style={ico(def.color)}>{def.symbol}</span>
+                {def.label}
               </button>
             );
           })}
@@ -1349,57 +2398,130 @@ interface ToolbarProps {
 
 function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
   const dark = state.darkMode;
-  const bg   = dark ? "#0e1120" : "#ffffff";
-  const bdr  = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const bg = dark ? "#0e1120" : "#ffffff";
+  const bdr = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
   const btn: React.CSSProperties = {
-    background:"transparent", border:"none",
-    color: dark?"#64748b":"#6b7280",
-    fontSize:11, fontFamily:"'JetBrains Mono',monospace",
-    padding:"4px 8px", borderRadius:4, cursor:"pointer",
+    background: "transparent",
+    border: "none",
+    color: dark ? "#64748b" : "#6b7280",
+    fontSize: 11,
+    fontFamily: "'JetBrains Mono',monospace",
+    padding: "4px 8px",
+    borderRadius: 4,
+    cursor: "pointer",
   };
-  const sep: React.CSSProperties = { width:1, height:18, background:dark?"#1e293b":"#e5e7eb", margin:"0 3px" };
+  const sep: React.CSSProperties = {
+    width: 1,
+    height: 18,
+    background: dark ? "#1e293b" : "#e5e7eb",
+    margin: "0 3px",
+  };
 
   const handleClear = () => {
     if (!window.confirm("Êtes-vous sûr de vouloir tout effacer ?")) return;
-    dispatch({ type:"LOAD", components:[], wires:[] });
-    dispatch({ type:"SELECT", ids:[] });
+    dispatch({ type: "LOAD", components: [], wires: [] });
+    dispatch({ type: "SELECT", ids: [] });
   };
 
   return (
-    <div style={{ height:40, background:bg, borderBottom:bdr, display:"flex", alignItems:"center", padding:"0 10px", gap:3, flexShrink:0 }}>
-      <span style={{ fontSize:9.5, letterSpacing:"0.15em", color:dark?"#3a4060":"#9ca3af", fontWeight:700, fontFamily:"monospace", marginRight:6 }}>{UI.appTitle}</span>
-      <button style={btn} onClick={() => dispatch({ type:"UNDO" })}>{UI.undo}</button>
-      <button style={btn} onClick={() => dispatch({ type:"REDO" })}>{UI.redo}</button>
+    <div
+      style={{
+        height: 40,
+        background: bg,
+        borderBottom: bdr,
+        display: "flex",
+        alignItems: "center",
+        padding: "0 10px",
+        gap: 3,
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 9.5,
+          letterSpacing: "0.15em",
+          color: dark ? "#3a4060" : "#9ca3af",
+          fontWeight: 700,
+          fontFamily: "monospace",
+          marginRight: 6,
+        }}
+      >
+        {UI.appTitle}
+      </span>
+      <button style={btn} onClick={() => dispatch({ type: "UNDO" })}>
+        {UI.undo}
+      </button>
+      <button style={btn} onClick={() => dispatch({ type: "REDO" })}>
+        {UI.redo}
+      </button>
       <div style={sep} />
-      <button style={{ ...btn, color:state.showGrid?"#2563eb":undefined }} onClick={() => dispatch({ type:"TOGGLE_GRID" })}>
+      <button
+        style={{ ...btn, color: state.showGrid ? "#2563eb" : undefined }}
+        onClick={() => dispatch({ type: "TOGGLE_GRID" })}
+      >
         {state.showGrid ? UI.gridOn : UI.gridOff}
       </button>
-      <button style={btn} onClick={() => dispatch({ type:"TOGGLE_DARK" })}>{dark ? UI.light : UI.dark}</button>
+      <button style={btn} onClick={() => dispatch({ type: "TOGGLE_DARK" })}>
+        {dark ? UI.light : UI.dark}
+      </button>
       <div style={sep} />
-      <button style={{ ...btn, color:"#2563eb", fontWeight:600 }} onClick={onShowNetlist}>{UI.netlistBtn}</button>
+      <button
+        style={{ ...btn, color: "#2563eb", fontWeight: 600 }}
+        onClick={onShowNetlist}
+      >
+        {UI.netlistBtn}
+      </button>
       <div style={sep} />
-      <button style={{ ...btn, color:"#dc2626" }} onClick={handleClear}>{UI.clearBtn}</button>
-      <div style={{ flex:1 }} />
-      <span style={{ fontSize:10, color:dark?"#3a4060":"#9ca3af", fontFamily:"monospace" }}>{Math.round(cam.z*100)}%</span>
+      <button style={{ ...btn, color: "#dc2626" }} onClick={handleClear}>
+        {UI.clearBtn}
+      </button>
+      <div style={{ flex: 1 }} />
+      <span
+        style={{
+          fontSize: 10,
+          color: dark ? "#3a4060" : "#9ca3af",
+          fontFamily: "monospace",
+        }}
+      >
+        {Math.round(cam.z * 100)}%
+      </span>
     </div>
   );
 }
 
 // ─── Status Bar ───────────────────────────────────────────────────────────────
 
-function StatusBar({ state }: { state:AppState }) {
+function StatusBar({ state }: { state: AppState }) {
   const dark = state.darkMode;
-  const tips: Record<ToolMode,string> = {
+  const tips: Record<ToolMode, string> = {
     select: UI.tipSelect,
-    wire:   UI.tipWire,
-    place:  UI.tipPlace(state.placingType ?? ""),
+    wire: UI.tipWire,
+    place: UI.tipPlace(state.placingType ?? ""),
   };
   return (
-    <div style={{ height:24, background:dark?"#07090f":"#f3f4f6", borderTop:dark?"1px solid #1e293b":"1px solid #e5e7eb", display:"flex", alignItems:"center", padding:"0 10px", gap:14, fontSize:10, fontFamily:"'JetBrains Mono',monospace", color:dark?"#2a3050":"#9ca3af", flexShrink:0 }}>
+    <div
+      style={{
+        height: 24,
+        background: dark ? "#07090f" : "#f3f4f6",
+        borderTop: dark ? "1px solid #1e293b" : "1px solid #e5e7eb",
+        display: "flex",
+        alignItems: "center",
+        padding: "0 10px",
+        gap: 14,
+        fontSize: 10,
+        fontFamily: "'JetBrains Mono',monospace",
+        color: dark ? "#2a3050" : "#9ca3af",
+        flexShrink: 0,
+      }}
+    >
       <span>{tips[state.tool]}</span>
-      <div style={{ flex:1 }} />
-      <span>x:{Math.round(state.mouseWorld.x)} y:{Math.round(state.mouseWorld.y)}</span>
-      <span>{state.components.length} comp · {state.wires.length} fils</span>
+      <div style={{ flex: 1 }} />
+      <span>
+        x:{Math.round(state.mouseWorld.x)} y:{Math.round(state.mouseWorld.y)}
+      </span>
+      <span>
+        {state.components.length} comp · {state.wires.length} fils
+      </span>
     </div>
   );
 }
@@ -1409,7 +2531,7 @@ function StatusBar({ state }: { state:AppState }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface CircuitCurrents {
-  wireCurrents:     Map<string, number>; // wireId  → ampères signés
+  wireCurrents: Map<string, number>; // wireId  → ampères signés
   componentCurrents: Map<string, number>; // compId  → ampères signés
 }
 
@@ -1430,15 +2552,20 @@ function computeCircuitCurrents(
     const v2 = n2 === "0" ? 0 : (simResult.nodeVoltages[`node${n2}`] ?? 0);
     let I = 0;
     switch (comp.type) {
-      case "resistor": I = (v1 - v2) / ((comp.props.resistance as number) || 1); break;
-      case "switch":   I = (comp.props.closed as boolean) ? (v1 - v2) / 0.001 : 0; break;
+      case "resistor":
+        I = (v1 - v2) / ((comp.props.resistance as number) || 1);
+        break;
+      case "switch":
+        I = (comp.props.closed as boolean) ? (v1 - v2) / 0.001 : 0;
+        break;
       case "vsource":
       case "led": {
         const name = componentNames.get(comp.id);
         I = name ? -(simResult.sourceCurrents[name] ?? 0) : 0;
         break;
       }
-      default: I = 0;
+      default:
+        I = 0;
     }
     componentCurrents.set(comp.id, I);
   }
@@ -1448,8 +2575,8 @@ function computeCircuitCurrents(
   for (const wire of circuit.wires) {
     const found: number[] = [];
     for (const comp of circuit.components) {
-      const touches = termWorlds(comp).some(tw =>
-        wire.points.some(wp => dist(tw, wp) < GRID * 0.6)
+      const touches = termWorlds(comp).some((tw) =>
+        wire.points.some((wp) => dist(tw, wp) < GRID * 0.6),
       );
       if (touches) {
         const c = componentCurrents.get(comp.id) ?? 0;
@@ -1458,21 +2585,28 @@ function computeCircuitCurrents(
     }
     wireCurrents.set(
       wire.id,
-      found.length > 0 ? found.reduce((a, b) => Math.abs(a) >= Math.abs(b) ? a : b, 0) : 0,
+      found.length > 0
+        ? found.reduce((a, b) => (Math.abs(a) >= Math.abs(b) ? a : b), 0)
+        : 0,
     );
   }
 
   // ── Passe 2 : propagation BFS aux fils intermédiaires ─────────────────────────
-  const wireById = new Map(circuit.wires.map(w => [w.id, w]));
-  const seeded   = new Set<string>();
-  for (const [id, c] of wireCurrents) { if (Math.abs(c) > 1e-9) seeded.add(id); }
+  const wireById = new Map(circuit.wires.map((w) => [w.id, w]));
+  const seeded = new Set<string>();
+  for (const [id, c] of wireCurrents) {
+    if (Math.abs(c) > 1e-9) seeded.add(id);
+  }
   const queue = Array.from(seeded);
   for (let i = 0; i < queue.length; i++) {
-    const wire = wireById.get(queue[i]); if (!wire) continue;
+    const wire = wireById.get(queue[i]);
+    if (!wire) continue;
     const current = wireCurrents.get(wire.id)!;
     for (const other of circuit.wires) {
       if (seeded.has(other.id)) continue;
-      const connected = wire.points.some(p => other.points.some(q => dist(p, q) < GRID * 0.6));
+      const connected = wire.points.some((p) =>
+        other.points.some((q) => dist(p, q) < GRID * 0.6),
+      );
       if (connected) {
         wireCurrents.set(other.id, current);
         seeded.add(other.id);
@@ -1488,34 +2622,50 @@ function computeCircuitCurrents(
 // ─── OVERLAY ANIMATION COURANT ───────────────────────────────────────────────
 // ── Paramètres visuels des particules (indépendants de la physique) ───────────
 const DOT_SPEED_SCALE = 30000; // px/s par ampère  — augmenter pour accélérer les dots
-const DOT_MIN_SPEED   = 45;    // px/s minimum (même pour très faible courant)
-const DOT_MAX_SPEED   = 320;   // px/s maximum (évite les dots trop rapides)
-const DOT_RADIUS      = 4;     // rayon en pixels
-const DOT_GLOW        = 8;     // shadowBlur
-const DOT_SPACING     = 32;    // distance minimale px entre deux dots sur le même fil
-const DOT_THRESHOLD   = 3e-4;  // ampères en dessous duquel les dots disparaissent
+const DOT_MIN_SPEED = 45; // px/s minimum (même pour très faible courant)
+const DOT_MAX_SPEED = 320; // px/s maximum (évite les dots trop rapides)
+const DOT_RADIUS = 4; // rayon en pixels
+const DOT_GLOW = 8; // shadowBlur
+const DOT_SPACING = 32; // distance minimale px entre deux dots sur le même fil
+const DOT_THRESHOLD = 3e-4; // ampères en dessous duquel les dots disparaissent
 
 // Couleurs RGB des LEDs pour le glow
-const LED_RGB: Record<string, [number,number,number]> = {
-  red:    [255,  50,  50],
-  green:  [ 50, 255,  80],
-  blue:   [ 50, 140, 255],
-  yellow: [255, 230,  40],
-  white:  [255, 255, 255],
+const LED_RGB: Record<string, [number, number, number]> = {
+  red: [255, 50, 50],
+  green: [50, 255, 80],
+  blue: [50, 140, 255],
+  yellow: [255, 230, 40],
+  white: [255, 255, 255],
 };
 // ═══════════════════════════════════════════════════════════════════════════════
 
-interface AnimDot  { pos: number; }
-interface AnimSeg  { len: number; ax: number; ay: number; bx: number; by: number; }
-interface AnimPath { id: string; segs: AnimSeg[]; totalLen: number; current: number; }
+interface AnimDot {
+  pos: number;
+}
+interface AnimSeg {
+  len: number;
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+}
+interface AnimPath {
+  id: string;
+  segs: AnimSeg[];
+  totalLen: number;
+  current: number;
+}
 
 // Construit les segments écran d'un chemin à partir de points monde
-function buildSegs(worldPts: Vec2[], cam: Camera): { segs: AnimSeg[]; totalLen: number } {
+function buildSegs(
+  worldPts: Vec2[],
+  cam: Camera,
+): { segs: AnimSeg[]; totalLen: number } {
   const segs: AnimSeg[] = [];
   let totalLen = 0;
   for (let i = 0; i < worldPts.length - 1; i++) {
     const a = w2s(worldPts[i].x, worldPts[i].y, cam);
-    const b = w2s(worldPts[i+1].x, worldPts[i+1].y, cam);
+    const b = w2s(worldPts[i + 1].x, worldPts[i + 1].y, cam);
     const len = dist(a, b);
     if (len > 0.5) segs.push({ len, ax: a.x, ay: a.y, bx: b.x, by: b.y });
     totalLen += len;
@@ -1526,52 +2676,64 @@ function buildSegs(worldPts: Vec2[], cam: Camera): { segs: AnimSeg[]; totalLen: 
 // Pré-remplit un chemin de dots uniformément espacés — "tout d'un coup"
 function prefillDots(totalLen: number, spacing: number): AnimDot[] {
   const count = Math.max(2, Math.ceil(totalLen / spacing));
-  return Array.from({ length: count }, (_, i) => ({ pos: (i / count) * totalLen }));
+  return Array.from({ length: count }, (_, i) => ({
+    pos: (i / count) * totalLen,
+  }));
 }
 
 interface CurrentOverlayProps {
-  wires:             Wire[];
-  components:        Component[];
-  wireCurrents:      Map<string, number>;
+  wires: Wire[];
+  components: Component[];
+  wireCurrents: Map<string, number>;
   componentCurrents: Map<string, number>;
-  cam:               Camera;
-  active:            boolean;
+  cam: Camera;
+  active: boolean;
 }
 
-function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, cam, active }: CurrentOverlayProps) {
-  const canvasRef  = useRef<HTMLCanvasElement>(null);
-  const rafRef     = useRef<number>(0);
-  const lastTsRef  = useRef<number>(0);
-  const dotsRef    = useRef<Map<string, AnimDot[]>>(new Map());
+function CurrentOverlay({
+  wires,
+  components,
+  wireCurrents,
+  componentCurrents,
+  cam,
+  active,
+}: CurrentOverlayProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef<number>(0);
+  const lastTsRef = useRef<number>(0);
+  const dotsRef = useRef<Map<string, AnimDot[]>>(new Map());
 
   // refs toujours frais — pas besoin de relancer le RAF à chaque mise à jour
-  const wiresRef              = useRef(wires);
-  const componentsRef         = useRef(components);
-  const wireCurrentsRef       = useRef(wireCurrents);
-  const componentCurrentsRef  = useRef(componentCurrents);
-  const camRef                = useRef(cam);
-  wiresRef.current             = wires;
-  componentsRef.current        = components;
-  wireCurrentsRef.current      = wireCurrents;
+  const wiresRef = useRef(wires);
+  const componentsRef = useRef(components);
+  const wireCurrentsRef = useRef(wireCurrents);
+  const componentCurrentsRef = useRef(componentCurrents);
+  const camRef = useRef(cam);
+  wiresRef.current = wires;
+  componentsRef.current = components;
+  wireCurrentsRef.current = wireCurrents;
   componentCurrentsRef.current = componentCurrents;
-  camRef.current               = cam;
+  camRef.current = cam;
 
   // resize canvas
   useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
-      canvas.width  = canvas.offsetWidth  * dpr;
+      canvas.width = canvas.offsetWidth * dpr;
       canvas.height = canvas.offsetHeight * dpr;
     };
     const ro = new ResizeObserver(resize);
-    ro.observe(canvas); resize();
+    ro.observe(canvas);
+    resize();
     return () => ro.disconnect();
   }, []);
 
   // boucle RAF — démarre/arrête selon active
   useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     cancelAnimationFrame(rafRef.current);
 
     if (!active) {
@@ -1587,12 +2749,14 @@ function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, ca
       const dt = Math.min((ts - (lastTsRef.current || ts)) / 1000, 0.05);
       lastTsRef.current = ts;
 
-      const ctx = canvas.getContext("2d"); if (!ctx) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
       const dpr = window.devicePixelRatio || 1;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.save(); ctx.scale(dpr, dpr);
+      ctx.save();
+      ctx.scale(dpr, dpr);
 
-      const cam  = camRef.current;
+      const cam = camRef.current;
 
       // ── glow LED ─────────────────────────────────────────────────────────────
       for (const comp of componentsRef.current) {
@@ -1600,25 +2764,46 @@ function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, ca
         const I = componentCurrentsRef.current.get(comp.id) ?? 0;
         if (Math.abs(I) < DOT_THRESHOLD) continue;
 
-        const [r, g, b] = LED_RGB[(comp.props.color as string) ?? "red"] ?? LED_RGB.red;
-        const center    = w2s(comp.position.x, comp.position.y, cam);
-        const radius    = GRID * 3.8 * cam.z;
+        const [r, g, b] =
+          LED_RGB[(comp.props.color as string) ?? "red"] ?? LED_RGB.red;
+        const center = w2s(comp.position.x, comp.position.y, cam);
+        const radius = GRID * 3.8 * cam.z;
 
         // pulse lent : oscille entre 0.55 et 1.0 à ~1.4 Hz
         const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(ts * 0.009));
 
         // halo ambiant large
-        const halo = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, radius);
-        halo.addColorStop(0,   `rgba(${r},${g},${b},${(pulse * 0.75).toFixed(2)})`);
-        halo.addColorStop(0.35,`rgba(${r},${g},${b},${(pulse * 0.35).toFixed(2)})`);
-        halo.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+        const halo = ctx.createRadialGradient(
+          center.x,
+          center.y,
+          0,
+          center.x,
+          center.y,
+          radius,
+        );
+        halo.addColorStop(
+          0,
+          `rgba(${r},${g},${b},${(pulse * 0.75).toFixed(2)})`,
+        );
+        halo.addColorStop(
+          0.35,
+          `rgba(${r},${g},${b},${(pulse * 0.35).toFixed(2)})`,
+        );
+        halo.addColorStop(1, `rgba(${r},${g},${b},0)`);
         ctx.fillStyle = halo;
         ctx.beginPath();
         ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
         ctx.fill();
 
         // point brillant central
-        const core = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, GRID * 0.8 * cam.z);
+        const core = ctx.createRadialGradient(
+          center.x,
+          center.y,
+          0,
+          center.x,
+          center.y,
+          GRID * 0.8 * cam.z,
+        );
         core.addColorStop(0, `rgba(255,255,255,${(pulse * 0.9).toFixed(2)})`);
         core.addColorStop(1, `rgba(${r},${g},${b},0)`);
         ctx.fillStyle = core;
@@ -1634,7 +2819,8 @@ function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, ca
         if (wire.points.length < 2) continue;
         const I = wireCurrentsRef.current.get(wire.id) ?? 0;
         const { segs, totalLen } = buildSegs(wire.points, cam);
-        if (totalLen > 1) paths.push({ id: wire.id, segs, totalLen, current: I });
+        if (totalLen > 1)
+          paths.push({ id: wire.id, segs, totalLen, current: I });
       }
 
       for (const comp of componentsRef.current) {
@@ -1643,13 +2829,14 @@ function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, ca
         const tws = termWorlds(comp);
         if (tws.length < 2) continue;
         const { segs, totalLen } = buildSegs(tws, cam);
-        if (totalLen > 1) paths.push({ id: `comp_${comp.id}`, segs, totalLen, current: I });
+        if (totalLen > 1)
+          paths.push({ id: `comp_${comp.id}`, segs, totalLen, current: I });
       }
 
       // ── animer chaque chemin ─────────────────────────────────────────────────
       ctx.shadowColor = "#fbbf24";
-      ctx.shadowBlur  = DOT_GLOW;
-      ctx.fillStyle   = "#fde68a";
+      ctx.shadowBlur = DOT_GLOW;
+      ctx.fillStyle = "#fde68a";
 
       for (const path of paths) {
         const { id, segs, totalLen, current: I } = path;
@@ -1659,19 +2846,22 @@ function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, ca
           continue;
         }
 
-        const absSpeed = Math.min(Math.max(Math.abs(I) * DOT_SPEED_SCALE, DOT_MIN_SPEED), DOT_MAX_SPEED);
-        const speed    = Math.sign(I) * absSpeed;
-        const spacing  = Math.max(DOT_SPACING, totalLen / 6);
+        const absSpeed = Math.min(
+          Math.max(Math.abs(I) * DOT_SPEED_SCALE, DOT_MIN_SPEED),
+          DOT_MAX_SPEED,
+        );
+        const speed = Math.sign(I) * absSpeed;
+        const spacing = Math.max(DOT_SPACING, totalLen / 6);
 
         // pré-remplir immédiatement si ce chemin est nouveau
         let dots = dotsRef.current.get(id);
         if (!dots) dots = prefillDots(totalLen, spacing);
 
         // avancer et faire boucler les dots (wrap circulaire)
-        dots = dots.map(d => {
+        dots = dots.map((d) => {
           let p = d.pos + speed * dt;
           if (p > totalLen) p -= totalLen;
-          if (p < 0)        p += totalLen;
+          if (p < 0) p += totalLen;
           return { pos: p };
         });
 
@@ -1684,7 +2874,13 @@ function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, ca
             if (rem <= seg.len) {
               const t = rem / seg.len;
               ctx.beginPath();
-              ctx.arc(seg.ax + (seg.bx - seg.ax) * t, seg.ay + (seg.by - seg.ay) * t, DOT_RADIUS, 0, Math.PI * 2);
+              ctx.arc(
+                seg.ax + (seg.bx - seg.ax) * t,
+                seg.ay + (seg.by - seg.ay) * t,
+                DOT_RADIUS,
+                0,
+                Math.PI * 2,
+              );
               ctx.fill();
               break;
             }
@@ -1705,7 +2901,13 @@ function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, ca
   return (
     <canvas
       ref={canvasRef}
-      style={{ position:"absolute", inset:0, width:"100%", height:"100%", pointerEvents:"none" }}
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+      }}
     />
   );
 }
@@ -1729,13 +2931,23 @@ type SeriesData =
   | { kind: "dc"; value: number }
   | null;
 
-function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeComponent, onClose }: GraphViewProps) {
+function GraphView({
+  config,
+  liveNetlist,
+  simNetlist,
+  simResult,
+  dark,
+  onChangeComponent,
+  onClose,
+}: GraphViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // use liveNetlist for node IDs so they stay current as the circuit changes
   const nc = useMemo(
-    () => liveNetlist.components.find(c => c.name === config.componentName) ?? null,
-    [liveNetlist, config.componentName]
+    () =>
+      liveNetlist.components.find((c) => c.name === config.componentName) ??
+      null,
+    [liveNetlist, config.componentName],
   );
 
   const series: SeriesData = useMemo(() => {
@@ -1748,11 +2960,19 @@ function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeC
     };
 
     if (simResult.timeSeries && simResult.timeSeries.length > 0) {
-      return { kind: "ac", points: simResult.timeSeries.map(tp => ({ t: tp.time, v: voltage(tp) })) };
+      return {
+        kind: "ac",
+        points: simResult.timeSeries.map((tp) => ({
+          t: tp.time,
+          v: voltage(tp),
+        })),
+      };
     }
 
-    const v1 = nc.n1 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n1}`] ?? 0);
-    const v2 = nc.n2 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n2}`] ?? 0);
+    const v1 =
+      nc.n1 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n1}`] ?? 0);
+    const v2 =
+      nc.n2 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n2}`] ?? 0);
     return { kind: "dc", value: v1 - v2 };
   }, [nc, simResult]);
 
@@ -1765,12 +2985,12 @@ function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeC
       const H = canvas.offsetHeight;
       if (W === 0 || H === 0) return;
       const dpr = window.devicePixelRatio || 1;
-      canvas.width  = W * dpr;
+      canvas.width = W * dpr;
       canvas.height = H * dpr;
       const ctx = canvas.getContext("2d")!;
       ctx.scale(dpr, dpr);
 
-      const bg      = dark ? "#080a12" : "#f9fafb";
+      const bg = dark ? "#080a12" : "#f9fafb";
       const textCol = dark ? "#475569" : "#9ca3af";
       const lineCol = "#2563eb";
       const gridCol = dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)";
@@ -1779,7 +2999,10 @@ function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeC
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, W, H);
 
-      const mt = 14, mr = 10, mb = 26, ml = 44;
+      const mt = 14,
+        mr = 10,
+        mb = 26,
+        ml = 44;
       const pw = W - ml - mr;
       const ph = H - mt - mb;
 
@@ -1789,7 +3012,11 @@ function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeC
       if (!series || !config.componentName) {
         ctx.fillStyle = textCol;
         ctx.textAlign = "center";
-        ctx.fillText(config.componentName ? UI.noData : UI.noCompSel, W / 2, H / 2);
+        ctx.fillText(
+          config.componentName ? UI.noData : UI.noCompSel,
+          W / 2,
+          H / 2,
+        );
         return;
       }
 
@@ -1805,12 +3032,14 @@ function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeC
 
       // AC line chart
       const pts = series.points;
-      const minT = pts[0].t, maxT = pts[pts.length - 1].t;
-      const rawMin = Math.min(...pts.map(p => p.v));
-      const rawMax = Math.max(...pts.map(p => p.v));
-      const range  = rawMax - rawMin || 1;
-      const pad    = range * 0.12;
-      const yMin   = rawMin - pad, yMax = rawMax + pad;
+      const minT = pts[0].t,
+        maxT = pts[pts.length - 1].t;
+      const rawMin = Math.min(...pts.map((p) => p.v));
+      const rawMax = Math.max(...pts.map((p) => p.v));
+      const range = rawMax - rawMin || 1;
+      const pad = range * 0.12;
+      const yMin = rawMin - pad,
+        yMax = rawMax + pad;
       const yRange = yMax - yMin;
 
       const toX = (t: number) => ml + ((t - minT) / (maxT - minT || 1)) * pw;
@@ -1821,9 +3050,14 @@ function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeC
       for (let i = 0; i <= yTicks; i++) {
         const v = yMin + (yRange * i) / yTicks;
         const y = toY(v);
-        ctx.strokeStyle = gridCol; ctx.lineWidth = 0.5;
-        ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(ml + pw, y); ctx.stroke();
-        ctx.fillStyle = textCol; ctx.textAlign = "right";
+        ctx.strokeStyle = gridCol;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(ml, y);
+        ctx.lineTo(ml + pw, y);
+        ctx.stroke();
+        ctx.fillStyle = textCol;
+        ctx.textAlign = "right";
         ctx.fillText(v.toPrecision(3), ml - 4, y + 3);
       }
 
@@ -1832,25 +3066,36 @@ function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeC
       for (let i = 0; i <= xTicks; i++) {
         const t = minT + ((maxT - minT) * i) / xTicks;
         const x = toX(t);
-        ctx.strokeStyle = gridCol; ctx.lineWidth = 0.5;
-        ctx.beginPath(); ctx.moveTo(x, mt); ctx.lineTo(x, mt + ph); ctx.stroke();
-        ctx.fillStyle = textCol; ctx.textAlign = "center";
+        ctx.strokeStyle = gridCol;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, mt);
+        ctx.lineTo(x, mt + ph);
+        ctx.stroke();
+        ctx.fillStyle = textCol;
+        ctx.textAlign = "center";
         ctx.fillText((t * 1000).toPrecision(3) + "ms", x, mt + ph + 14);
       }
 
       // axes
-      ctx.strokeStyle = axisCol; ctx.lineWidth = 1;
+      ctx.strokeStyle = axisCol;
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(ml, mt); ctx.lineTo(ml, mt + ph);
-      ctx.moveTo(ml, mt + ph); ctx.lineTo(ml + pw, mt + ph);
+      ctx.moveTo(ml, mt);
+      ctx.lineTo(ml, mt + ph);
+      ctx.moveTo(ml, mt + ph);
+      ctx.lineTo(ml + pw, mt + ph);
       ctx.stroke();
 
       // data line
-      ctx.strokeStyle = lineCol; ctx.lineWidth = 1.5;
-      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.strokeStyle = lineCol;
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(toX(pts[0].t), toY(pts[0].v));
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(toX(pts[i].t), toY(pts[i].v));
+      for (let i = 1; i < pts.length; i++)
+        ctx.lineTo(toX(pts[i].t), toY(pts[i].v));
       ctx.stroke();
     };
 
@@ -1860,37 +3105,73 @@ function GraphView({ config, liveNetlist, simNetlist, simResult, dark, onChangeC
     return () => ro.disconnect();
   }, [series, dark, config.componentName]);
 
-  const bdr     = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const bdr = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
   const textCol = dark ? "#94a3b8" : "#374151";
-  const mutCol  = dark ? "#475569" : "#9ca3af";
+  const mutCol = dark ? "#475569" : "#9ca3af";
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", borderRight:bdr, minWidth:200, flex:1, overflow:"hidden" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 6px", borderBottom:bdr, flexShrink:0 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        borderRight: bdr,
+        minWidth: 200,
+        flex: 1,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "3px 6px",
+          borderBottom: bdr,
+          flexShrink: 0,
+        }}
+      >
         <select
           value={config.componentName ?? ""}
-          onChange={e => onChangeComponent(e.target.value || null)}
+          onChange={(e) => onChangeComponent(e.target.value || null)}
           style={{
-            flex:1, background:dark?"#0f172a":"#f9fafb",
-            border:dark?"1px solid #1e293b":"1px solid #d1d5db",
-            color:textCol, borderRadius:4, fontSize:10,
-            fontFamily:"'JetBrains Mono',monospace", padding:"2px 4px",
+            flex: 1,
+            background: dark ? "#0f172a" : "#f9fafb",
+            border: dark ? "1px solid #1e293b" : "1px solid #d1d5db",
+            color: textCol,
+            borderRadius: 4,
+            fontSize: 10,
+            fontFamily: "'JetBrains Mono',monospace",
+            padding: "2px 4px",
           }}
         >
           <option value="">{UI.chooseComp}</option>
-          {liveNetlist.components.map(c => (
-            <option key={c.name} value={c.name}>{fmtNetlistComp(c)}</option>
+          {liveNetlist.components.map((c) => (
+            <option key={c.name} value={c.name}>
+              {fmtNetlistComp(c)}
+            </option>
           ))}
         </select>
         <button
           onClick={onClose}
-          style={{ background:"transparent", border:"none", color:mutCol, cursor:"pointer", fontSize:14, lineHeight:1, padding:"1px 4px", flexShrink:0 }}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: mutCol,
+            cursor: "pointer",
+            fontSize: 14,
+            lineHeight: 1,
+            padding: "1px 4px",
+            flexShrink: 0,
+          }}
         >
           ×
         </button>
       </div>
-      <div style={{ flex:1, minHeight:0 }}>
-        <canvas ref={canvasRef} style={{ width:"100%", height:"100%", display:"block" }} />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <canvas
+          ref={canvasRef}
+          style={{ width: "100%", height: "100%", display: "block" }}
+        />
       </div>
     </div>
   );
@@ -1910,46 +3191,93 @@ interface GraphPanelProps {
   onStop: () => void;
 }
 
-function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSimulate, onStop }: GraphPanelProps) {
-  const [graphs, setGraphs] = useState<GraphConfig[]>([{ id: uid(), componentName: null }]);
+function GraphPanel({
+  liveNetlist,
+  simNetlist,
+  simResult,
+  simRunning,
+  dark,
+  onSimulate,
+  onStop,
+}: GraphPanelProps) {
+  const [graphs, setGraphs] = useState<GraphConfig[]>([
+    { id: uid(), componentName: null },
+  ]);
   const [open, setOpen] = useState(true);
 
-  const bg     = dark ? "#0e1120" : "#fafafa";
-  const bdr    = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const bg = dark ? "#0e1120" : "#fafafa";
+  const bdr = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
   const mutCol = dark ? "#475569" : "#9ca3af";
 
-  const addGraph    = () => setGraphs(prev => [...prev, { id: uid(), componentName: null }]);
-  const removeGraph = (id: string) => setGraphs(prev => prev.length > 1 ? prev.filter(g => g.id !== id) : prev);
+  const addGraph = () =>
+    setGraphs((prev) => [...prev, { id: uid(), componentName: null }]);
+  const removeGraph = (id: string) =>
+    setGraphs((prev) =>
+      prev.length > 1 ? prev.filter((g) => g.id !== id) : prev,
+    );
   const updateGraph = (id: string, componentName: string | null) =>
-    setGraphs(prev => prev.map(g => g.id === id ? { ...g, componentName } : g));
+    setGraphs((prev) =>
+      prev.map((g) => (g.id === id ? { ...g, componentName } : g)),
+    );
 
   return (
-    <div style={{ flexShrink:0, background:bg, borderTop:bdr }}>
+    <div style={{ flexShrink: 0, background: bg, borderTop: bdr }}>
       {/* header */}
-      <div style={{ height:32, display:"flex", alignItems:"center", padding:"0 10px", gap:8 }}>
-        <span style={{ fontSize:9, fontWeight:700, letterSpacing:"0.12em", color:mutCol, fontFamily:"monospace" }}>
+      <div
+        style={{
+          height: 32,
+          display: "flex",
+          alignItems: "center",
+          padding: "0 10px",
+          gap: 8,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            letterSpacing: "0.12em",
+            color: mutCol,
+            fontFamily: "monospace",
+          }}
+        >
           📊 {UI.graphTitle}
         </span>
-        <div style={{ flex:1 }} />
+        <div style={{ flex: 1 }} />
         {simResult?.error && (
-          <span style={{ fontSize:9, color:"#dc2626", fontFamily:"monospace" }}>
-            {UI.simErrPrefix}{simResult.error}
+          <span
+            style={{ fontSize: 9, color: "#dc2626", fontFamily: "monospace" }}
+          >
+            {UI.simErrPrefix}
+            {simResult.error}
           </span>
         )}
         <button
           onClick={simRunning ? onStop : onSimulate}
           style={{
-            fontSize:10, fontFamily:"'JetBrains Mono',monospace",
+            fontSize: 10,
+            fontFamily: "'JetBrains Mono',monospace",
             background: simRunning ? "#7f1d1d" : "#1d4ed8",
-            color:"#fff", border:"none", borderRadius:4,
-            padding:"3px 10px", cursor:"pointer",
+            color: "#fff",
+            border: "none",
+            borderRadius: 4,
+            padding: "3px 10px",
+            cursor: "pointer",
           }}
         >
           {simRunning ? UI.stop : UI.simulate}
         </button>
         <button
-          onClick={() => setOpen(o => !o)}
-          style={{ background:"transparent", border:"none", color:mutCol, cursor:"pointer", fontSize:11, fontFamily:"monospace", padding:"0 4px" }}
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: mutCol,
+            cursor: "pointer",
+            fontSize: 11,
+            fontFamily: "monospace",
+            padding: "0 4px",
+          }}
         >
           {open ? "▼" : "▲"}
         </button>
@@ -1957,8 +3285,15 @@ function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSi
 
       {/* graphs */}
       {open && (
-        <div style={{ height:160, display:"flex", borderTop:bdr, overflow:"hidden" }}>
-          {graphs.map(g => (
+        <div
+          style={{
+            height: 160,
+            display: "flex",
+            borderTop: bdr,
+            overflow: "hidden",
+          }}
+        >
+          {graphs.map((g) => (
             <GraphView
               key={g.id}
               config={g}
@@ -1966,7 +3301,7 @@ function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSi
               simNetlist={simNetlist}
               simResult={simResult}
               dark={dark}
-              onChangeComponent={name => updateGraph(g.id, name)}
+              onChangeComponent={(name) => updateGraph(g.id, name)}
               onClose={() => removeGraph(g.id)}
             />
           ))}
@@ -1974,9 +3309,16 @@ function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSi
             onClick={addGraph}
             title="Ajouter un graphique"
             style={{
-              flexShrink:0, width:36, background:"transparent",
-              border:"none", color:mutCol, cursor:"pointer",
-              fontSize:20, display:"flex", alignItems:"center", justifyContent:"center",
+              flexShrink: 0,
+              width: 36,
+              background: "transparent",
+              border: "none",
+              color: mutCol,
+              cursor: "pointer",
+              fontSize: 20,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             {UI.addGraph}
@@ -1990,41 +3332,105 @@ function GraphPanel({ liveNetlist, simNetlist, simResult, simRunning, dark, onSi
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── ROOT APP ────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
+//
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  if (
+    params.id == undefined ||
+    (params.id != "guest" && !Number.isInteger(params))
+  ) {
+    return redirect("/projects/guest");
+  }
+
+  if (params.id == "guest") {
+    // return example circuit
+    return { id: params.id, components: [], wires: [] };
+  }
+
+  const cookieHeader = request.headers.get("Cookie");
+  const session = getCookie(cookieHeader, "eclab_session_id");
+  if (session === null) {
+    return redirect("/projects/guest");
+  }
+
+  const resp = await fetch(
+    `${import.meta.env.VITE_API_ENDPOINT}/projects/${params.id}`,
+    {
+      method: "GET",
+      headers: request.headers,
+    },
+  );
+
+  if (!resp.ok) {
+    return redirect("/projects/guest");
+  }
+
+  const project = await resp.json();
+  console.log(project);
+
+  return {
+    id: params.id,
+    components: project.circuit.components ?? [],
+    wires: project.circuit.wires ?? [],
+  };
+}
 
 export default function App() {
-  const [state, dispatch] = useReducer(reducer, initialState);
-  const [cam, setCam]     = useState<Camera>({ x:320, y:220, z:1 });
+  const loaderData = useLoaderData<typeof loader>();
+  const [state, dispatch] = useReducer(reducer, {
+    components: loaderData.components ?? [],
+    wires: loaderData.wires ?? [],
+    selection: [],
+    tool: "select",
+    placingType: null,
+    wirePoints: [],
+    mouseWorld: { x: 0, y: 0 },
+    ghostPos: null,
+    ghostRot: 0,
+    showGrid: true,
+    darkMode: readPersistedTheme(),
+    history: [{ components: [], wires: [] }],
+    historyIdx: 0,
+  } as AppState);
+  const [cam, setCam] = useState<Camera>({ x: 320, y: 220, z: 1 });
 
   // popover
-  const [popoverComp,   setPopoverComp]   = useState<Component|null>(null);
-  const [popoverAnchor, setPopoverAnchor] = useState<Vec2|null>(null);
-  const [canvasRect,    setCanvasRect]    = useState<DOMRect|null>(null);
+  const [popoverComp, setPopoverComp] = useState<Component | null>(null);
+  const [popoverAnchor, setPopoverAnchor] = useState<Vec2 | null>(null);
+  const [canvasRect, setCanvasRect] = useState<DOMRect | null>(null);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
 
   // netlist modal
   const [showNetlist, setShowNetlist] = useState(false);
 
   // simulation
-  const workerRef        = useRef<Worker | null>(null);
+  const workerRef = useRef<Worker | null>(null);
   const accTimeSeriesRef = useRef<SimPoint[]>([]);
-  const [simResult,  setSimResult]  = useState<SimResult | null>(null);
+  const [simResult, setSimResult] = useState<SimResult | null>(null);
   const [simNetlist, setSimNetlist] = useState<Netlist | null>(null);
   const [simRunning, setSimRunning] = useState(false);
 
   const liveNetlist = useMemo(
     () => generateNetlist({ components: state.components, wires: state.wires }),
-    [state.components, state.wires]
+    [state.components, state.wires],
   );
 
   const { wireCurrents, componentCurrents } = useMemo(
-    () => simResult && !simResult.error
-      ? computeCircuitCurrents({ components: state.components, wires: state.wires }, liveNetlist, simResult)
-      : { wireCurrents: new Map<string, number>(), componentCurrents: new Map<string, number>() },
-    [simResult, state.components, state.wires, liveNetlist]
+    () =>
+      simResult && !simResult.error
+        ? computeCircuitCurrents(
+            { components: state.components, wires: state.wires },
+            liveNetlist,
+            simResult,
+          )
+        : {
+            wireCurrents: new Map<string, number>(),
+            componentCurrents: new Map<string, number>(),
+          },
+    [simResult, state.components, state.wires, liveNetlist],
   );
 
-  const dark  = state.darkMode;
-  const empty = state.components.length===0 && state.wires.length===0;
+  const dark = state.darkMode;
+  const empty = state.components.length === 0 && state.wires.length === 0;
 
   // init worker once
   useEffect(() => {
@@ -2033,20 +3439,30 @@ export default function App() {
     worker.onmessage = (e) => {
       if (e.data?.error) {
         setSimRunning(false);
-        setSimResult({ error: e.data.error, nodeVoltages: {}, sourceCurrents: {} });
+        setSimResult({
+          error: e.data.error,
+          nodeVoltages: {},
+          sourceCurrents: {},
+        });
         return;
       }
-      if (e.data?.type === 'chunk') {
+      if (e.data?.type === "chunk") {
         const newPoints: SimPoint[] = e.data.timeSeries ?? [];
         if (newPoints.length > 0) {
           const combined = [...accTimeSeriesRef.current, ...newPoints];
           // keep last 2 seconds of data at 1ms resolution = 2000 points
-          accTimeSeriesRef.current = combined.length > 2000 ? combined.slice(combined.length - 2000) : combined;
+          accTimeSeriesRef.current =
+            combined.length > 2000
+              ? combined.slice(combined.length - 2000)
+              : combined;
         }
         setSimResult({
-          nodeVoltages:   e.data.nodeVoltages   ?? {},
+          nodeVoltages: e.data.nodeVoltages ?? {},
           sourceCurrents: e.data.sourceCurrents ?? {},
-          timeSeries:     accTimeSeriesRef.current.length > 0 ? [...accTimeSeriesRef.current] : undefined,
+          timeSeries:
+            accTimeSeriesRef.current.length > 0
+              ? [...accTimeSeriesRef.current]
+              : undefined,
         });
       }
     };
@@ -2056,22 +3472,38 @@ export default function App() {
   // push updated netlist to worker whenever components change during simulation
   useEffect(() => {
     if (!simRunning) return;
-    const netlist = generateNetlist({ components: state.components, wires: state.wires });
-    workerRef.current?.postMessage({ type: "updateNetlist", netlist: netlist.components });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    const netlist = generateNetlist({
+      components: state.components,
+      wires: state.wires,
+    });
+    workerRef.current?.postMessage({
+      type: "updateNetlist",
+      netlist: netlist.components,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.components, state.wires]);
 
   const handleSimulate = useCallback(() => {
-    const netlist = generateNetlist({ components: state.components, wires: state.wires });
+    const netlist = generateNetlist({
+      components: state.components,
+      wires: state.wires,
+    });
     if (netlist.components.length === 0) {
-      setSimResult({ error: "Circuit vide", nodeVoltages: {}, sourceCurrents: {} });
+      setSimResult({
+        error: "Circuit vide",
+        nodeVoltages: {},
+        sourceCurrents: {},
+      });
       return;
     }
     setSimNetlist(netlist);
     accTimeSeriesRef.current = [];
     setSimResult(null);
     setSimRunning(true);
-    workerRef.current?.postMessage({ type: "simulate", netlist: netlist.components });
+    workerRef.current?.postMessage({
+      type: "simulate",
+      netlist: netlist.components,
+    });
   }, [state.components, state.wires]);
 
   const handleStop = useCallback(() => {
@@ -2081,8 +3513,11 @@ export default function App() {
 
   // track canvas bounding rect
   useEffect(() => {
-    const el = canvasWrapRef.current; if (!el) return;
-    const ro = new ResizeObserver(() => setCanvasRect(el.getBoundingClientRect()));
+    const el = canvasWrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() =>
+      setCanvasRect(el.getBoundingClientRect()),
+    );
     ro.observe(el);
     setCanvasRect(el.getBoundingClientRect());
     return () => ro.disconnect();
@@ -2091,7 +3526,7 @@ export default function App() {
   // sync popover with selection
   useEffect(() => {
     if (state.selection.length === 1) {
-      const comp = state.components.find(c => c.id === state.selection[0]);
+      const comp = state.components.find((c) => c.id === state.selection[0]);
       if (comp) {
         setPopoverComp(comp);
         setPopoverAnchor(w2s(comp.position.x, comp.position.y, cam));
@@ -2100,49 +3535,87 @@ export default function App() {
     }
     setPopoverComp(null);
     setPopoverAnchor(null);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.selection]);
 
   // keep anchor in sync on pan/zoom/move
   useEffect(() => {
     if (!popoverComp) return;
-    const live = state.components.find(c => c.id === popoverComp.id);
+    const live = state.components.find((c) => c.id === popoverComp.id);
     if (live) {
       setPopoverComp(live);
       setPopoverAnchor(w2s(live.position.x, live.position.y, cam));
     } else {
-      setPopoverComp(null); setPopoverAnchor(null);
+      setPopoverComp(null);
+      setPopoverAnchor(null);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cam, state.components]);
 
-  const handleComponentClick = useCallback((_id:string, screen:Vec2) => {
+  useEffect(() => {
+    console.log("updating");
+
+    if (loaderData.id != "guest") {
+      fetch(`/api/projects/circuit/${loaderData.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          circuit: { components: state.components, wires: state.wires },
+        }),
+      });
+    }
+  }, [state.components, state.wires]);
+
+  const handleComponentClick = useCallback((_id: string, screen: Vec2) => {
     setPopoverAnchor(screen);
   }, []);
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100vh", width:"100vw", fontFamily:"'JetBrains Mono','Fira Code',monospace", overflow:"hidden", background:dark?"#0a0c14":"#ffffff" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        width: "100vw",
+        fontFamily: "'JetBrains Mono','Fira Code',monospace",
+        overflow: "hidden",
+        background: dark ? "#0a0c14" : "#ffffff",
+      }}
+    >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
         ::-webkit-scrollbar { width:5px; }
-        ::-webkit-scrollbar-thumb { background:${dark?"#1e293b":"#d1d5db"}; border-radius:3px; }
+        ::-webkit-scrollbar-thumb { background:${dark ? "#1e293b" : "#d1d5db"}; border-radius:3px; }
         button:hover { opacity:.82; }
         input[type=number] { -moz-appearance:textfield; }
         input[type=number]::-webkit-inner-spin-button { opacity:.5; }
-        select option { background:${dark?"#0e1120":"#ffffff"}; }
+        select option { background:${dark ? "#0e1120" : "#ffffff"}; }
         [data-radix-popper-content-wrapper] { z-index:1000 !important; }
       `}</style>
 
-      <Toolbar state={state} dispatch={dispatch} cam={cam} onShowNetlist={() => setShowNetlist(true)} />
+      <Toolbar
+        state={state}
+        dispatch={dispatch}
+        cam={cam}
+        onShowNetlist={() => setShowNetlist(true)}
+      />
 
-      <div style={{ display:"flex", flex:1, overflow:"hidden" }}>
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Palette state={state} dispatch={dispatch} />
 
-        <div ref={canvasWrapRef} style={{ flex:1, position:"relative", overflow:"hidden" }}>
+        <div
+          ref={canvasWrapRef}
+          style={{ flex: 1, position: "relative", overflow: "hidden" }}
+        >
           <CircuitCanvas
-            state={state} dispatch={dispatch}
-            cam={cam} setCam={setCam}
+            state={state}
+            dispatch={dispatch}
+            cam={cam}
+            setCam={setCam}
             onComponentClick={handleComponentClick}
           />
           <CurrentOverlay
@@ -2155,10 +3628,32 @@ export default function App() {
           />
 
           {empty && (
-            <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", textAlign:"center", pointerEvents:"none" }}>
-              <div style={{ fontSize:36, opacity:.07 }}>⚡</div>
-              <div style={{ fontSize:11, color:dark?"#2a3050":"#9ca3af", fontFamily:"monospace", lineHeight:2.2, marginTop:8 }}>
-                {UI.emptyHint.split("\n").map((l,i) => <span key={i}>{l}<br/></span>)}
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%,-50%)",
+                textAlign: "center",
+                pointerEvents: "none",
+              }}
+            >
+              <div style={{ fontSize: 36, opacity: 0.07 }}>⚡</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: dark ? "#2a3050" : "#9ca3af",
+                  fontFamily: "monospace",
+                  lineHeight: 2.2,
+                  marginTop: 8,
+                }}
+              >
+                {UI.emptyHint.split("\n").map((l, i) => (
+                  <span key={i}>
+                    {l}
+                    <br />
+                  </span>
+                ))}
               </div>
             </div>
           )}
@@ -2187,7 +3682,7 @@ export default function App() {
 
       {showNetlist && (
         <NetlistModal
-          circuit={{ components:state.components, wires:state.wires }}
+          circuit={{ components: state.components, wires: state.wires }}
           dark={dark}
           onClose={() => setShowNetlist(false)}
         />
