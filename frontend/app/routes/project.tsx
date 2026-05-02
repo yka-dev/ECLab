@@ -3334,10 +3334,9 @@ function GraphPanel({
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  if (
-    params.id == undefined ||
-    (params.id != "guest" && !Number.isInteger(params))
-  ) {
+  console.log(params.id);
+  if (params.id == undefined || (params.id != "guest" && isNaN(+params.id))) {
+    console.log("redirecting due to invalid id");
     return redirect("/projects/guest");
   }
 
@@ -3349,6 +3348,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const cookieHeader = request.headers.get("Cookie");
   const session = getCookie(cookieHeader, "eclab_session_id");
   if (session === null) {
+    console.log("redirecting due to invalid session");
     return redirect("/projects/guest");
   }
 

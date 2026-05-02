@@ -24,7 +24,6 @@ import { useLoaderData } from "react-router";
 type Project = {
   id: string;
   name: string;
-  thumbnail: string;
 };
 
 export async function loader({ request }: { request: Request }) {
@@ -185,14 +184,6 @@ export default function Projects() {
                   onClick={() => navigate(`/projects/${project.id}`)}
                 >
                   <CardContent className="p-0">
-                    <div className="aspect-video w-full overflow-hidden rounded-t-lg">
-                      <img
-                        src={project.thumbnail}
-                        alt={project.name}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-
                     <div className="flex items-center justify-between p-4">
                       <span className="truncate font-medium">
                         {project.name}
