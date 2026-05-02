@@ -19,8 +19,8 @@ const ZOOM_MAX = 6;
 const THEME_STORAGE_KEY = "circuit-sandbox-theme";
 
 const UI = {
-  appTitle: "⚡ CIRCUIT",
-  sandboxTitle: "⚡ CIRCUIT SANDBOX",
+  appTitle: "CIRCUIT",
+  sandboxTitle: "CIRCUIT SANDBOX",
   toolsHeader: "OUTILS",
   select: "Sélection",
   wire: "Fil",
@@ -440,7 +440,7 @@ const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
   },
 
   ground: {
-    label: "Masse",
+    label: "Mise à la terre",
     symbol: "GND",
     color: "#1f2937",
     terminals: [{ x: 0, y: -1 }],
@@ -3365,12 +3365,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const project = await resp.json();
-  console.log(project);
+  const circuit = { components: [], wires: [] };
+
+  if (project.circuit !== null) {
+    circuit.components = project.circuit.components ?? [];
+    circuit.wires = project.circuit.wires ?? [];
+  }
 
   return {
     id: params.id,
-    components: project.circuit.components ?? [],
-    wires: project.circuit.wires ?? [],
+    components: circuit.components,
+    wires: circuit.wires,
   };
 }
 
