@@ -19,6 +19,7 @@ import { MoreVertical, Plus, Search, LogOut } from "lucide-react";
 import { getCookie } from "~/lib/utils";
 import { redirect, useNavigate } from "react-router";
 import { toast } from "sonner";
+import { useLoaderData } from "react-router";
 
 type Project = {
   id: string;
@@ -35,25 +36,23 @@ export async function loader({ request }: { request: Request }) {
 
   const resp = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/projects`, {
     method: "GET",
-    headers: request.headers
-  }) 
+    headers: request.headers,
+  });
 
-  if(!resp.ok) {
-    return redirect("/projects/guest")
+  if (!resp.ok) {
+    return redirect("/projects/guest");
   }
 
   const projects = await resp.json();
 
-
   return projects ?? [];
 }
-export default function Projects({loaderData}) {
-  const [projects, setProjects] = useState<Project[]>(loaderData);
+export default function Projects() {
+  const [projects, setProjects] = useState<Project[]>(useLoaderData());
   const [search, setSearch] = useState("");
   const [openCreate, setOpenCreate] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
-  const [loading, setLoading] = useState(false)
-
+  const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
 
@@ -66,13 +65,13 @@ export default function Projects({loaderData}) {
     if (!newName) return;
 
     fetch(`/api/projects/${id}`, {
-      method :"PATCH",
+      method: "PATCH",
       credentials: "include",
       headers: {
-        "Content-Type" : "application/json"
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ name: newName })
-    })
+      body: JSON.stringify({ name: newName }),
+    });
 
     setProjects((prev) =>
       prev.map((p) => (p.id === id ? { ...p, name: newName } : p)),
@@ -81,9 +80,9 @@ export default function Projects({loaderData}) {
 
   function handleDelete(id: string) {
     fetch(`/api/projects/${id}`, {
-      method :"DELETE",
-      credentials: "include"
-    })
+      method: "DELETE",
+      credentials: "include",
+    });
     setProjects((prev) => prev.filter((p) => p.id !== id));
   }
 
@@ -91,32 +90,30 @@ export default function Projects({loaderData}) {
     const name = newProjectName.trim();
     if (!name) return;
 
-
-    setLoading(true)
+    setLoading(true);
     fetch(`/api/project`, {
       method: "POST",
       credentials: "include",
-      headers : {
-        "Content-Type" : "application/json"
+      headers: {
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({name})
-    }).then(response => {
-      if (response.ok) {
-        return response.json()
-      } else {
-        toast.error("Echec lors de la création du projet");
-      }
+      body: JSON.stringify({ name }),
     })
-    .then(project => {
-      setProjects((prev) => [...prev, project]);
-    })
-    .finally(() => {
-      setLoading(false)
-      setOpenCreate(false)
-      setNewProjectName("");
-    })
-
-
+      .then((response) => {
+        if (response.ok) {
+          return response.json();
+        } else {
+          toast.error("Echec lors de la création du projet");
+        }
+      })
+      .then((project) => {
+        setProjects((prev) => [...prev, project]);
+      })
+      .finally(() => {
+        setLoading(false);
+        setOpenCreate(false);
+        setNewProjectName("");
+      });
   }
 
   return (
@@ -182,7 +179,11 @@ export default function Projects({loaderData}) {
           <>
             <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {filteredProjects.map((project) => (
-                <Card key={project.id} className="cursor-pointer" onClick={() => navigate(`/projects/${project.id}`)}>
+                <Card
+                  key={project.id}
+                  className="cursor-pointer"
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                >
                   <CardContent className="p-0">
                     <div className="aspect-video w-full overflow-hidden rounded-t-lg">
                       <img
@@ -193,7 +194,7 @@ export default function Projects({loaderData}) {
                     </div>
 
                     <div className="flex items-center justify-between p-4">
-                      <span className="truncate font-medium" >
+                      <span className="truncate font-medium">
                         {project.name}
                       </span>
 
@@ -258,7 +259,9 @@ export default function Projects({loaderData}) {
               Annuler
             </Button>
 
-            <Button onClick={handleCreateProject} disabled={loading}>Créer le projet</Button>
+            <Button onClick={handleCreateProject} disabled={loading}>
+              Créer le projet
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
