@@ -382,7 +382,7 @@ func main() {
 		}
 
 		var updateProjectCircuitData struct {
-			Circuit []byte `json:"circuit"`
+			Circuit json.RawMessage `json:"circuit"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&updateProjectCircuitData); err != nil {
