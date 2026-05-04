@@ -1542,10 +1542,16 @@ function computeCircuitCurrents(
       case "resistor": I = (v1 - v2) / ((comp.props.resistance as number) || 1); break;
       case "switch":   I = (comp.props.closed as boolean) ? (v1 - v2) / 0.001 : 0; break;
       case "vsource": {
-        // la batterie : courant MNA = courant entrant dans n1 (borne +)
-        // → on inverse pour que les dots circulent de n2 vers n1 à l'intérieur de la source
+        // Convention MNA : la variable J dans la matrice est telle que
+        //   J = courant "quittant n1 via la branche source" dans Gx=b.
+        // Pour une source qui fournit du courant, J < 0
+        //   (5mA quittent n1 via résistance → J = -5mA pour équilibrer KCL).
+        //
+        // On utilise J directement (SANS négation) :
+        //   I = J < 0  →  dots de T1(−) vers T0(+) sur le corps de la source ✓
+        //               →  formule de signe sur les fils cohérente avec les passifs ✓
         const name = componentNames.get(comp.id);
-        I = name ? -(simResult.sourceCurrents[name] ?? 0) : 0;
+        I = name ? (simResult.sourceCurrents[name] ?? 0) : 0;
         break;
       }
       case "led": {
@@ -1563,41 +1569,98 @@ function computeCircuitCurrents(
     componentCurrents.set(comp.id, I);
   }
 
-  // ── Passe 1 : fils touchant une borne de composant ────────────────────────────
+  // ── Passe 1 : fils touchant une borne de composant (direction correcte) ────────
+  //
+  // Règle de signe :
+  //   I_comp > 0  ↔  courant conventionnel de T0 → T1 à travers le composant.
+  //
+  //   Au terminal T0 (entrée) : le courant entre dans le composant
+  //     → le fil doit amener les dots VERS T0
+  //   Au terminal T1 (sortie) : le courant sort du composant
+  //     → le fil doit emmener les dots LOIN de T1
+  //
+  //   wireEndIdx = 0  si points[0]    est près du terminal
+  //   wireEndIdx = 1  si points[last] est près du terminal
+  //
+  //   sign = termIdx !== wireEndIdx ? +1 : -1
+  //   (quand le bout de connexion est "à l'opposé" du sens naturel du fil, on garde;
+  //    sinon on inverse)
   const wireCurrents = new Map<string, number>();
   for (const wire of circuit.wires) {
-    const found: number[] = [];
+    let bestCurrent = 0;
+    let bestMag     = 0;
+    const firstPt   = wire.points[0];
+    const lastPt    = wire.points[wire.points.length - 1];
+
     for (const comp of circuit.components) {
-      const touches = termWorlds(comp).some(tw =>
-        wire.points.some(wp => dist(tw, wp) < GRID * 0.6)
-      );
-      if (touches) {
-        const c = componentCurrents.get(comp.id) ?? 0;
-        if (Math.abs(c) > 1e-9) found.push(c);
+      const terms  = termWorlds(comp);
+      const I_comp = componentCurrents.get(comp.id) ?? 0;
+      if (Math.abs(I_comp) < 1e-9) continue;
+
+      for (let termIdx = 0; termIdx < terms.length; termIdx++) {
+        const tw        = terms[termIdx];
+        const firstNear = dist(firstPt, tw) < GRID * 0.6;
+        const lastNear  = dist(lastPt,  tw) < GRID * 0.6;
+        if (!firstNear && !lastNear) continue;
+
+        const wireEndIdx = firstNear ? 0 : 1;
+        const sign       = termIdx !== wireEndIdx ? 1 : -1;
+        const signedI    = sign * I_comp;
+
+        if (Math.abs(signedI) > bestMag) {
+          bestMag     = Math.abs(signedI);
+          bestCurrent = signedI;
+        }
       }
     }
-    wireCurrents.set(
-      wire.id,
-      found.length > 0 ? found.reduce((a, b) => Math.abs(a) >= Math.abs(b) ? a : b, 0) : 0,
-    );
+    wireCurrents.set(wire.id, bestCurrent);
   }
 
-  // ── Passe 2 : propagation BFS aux fils intermédiaires ─────────────────────────
+  // ── Passe 2 : propagation BFS aux fils intermédiaires (signe cohérent) ─────────
+  //
+  // On détermine si le courant du fil A ARRIVE au point de jonction ou en PART,
+  // puis on en déduit le signe correct pour le fil B connecté à ce point.
   const wireById = new Map(circuit.wires.map(w => [w.id, w]));
   const seeded   = new Set<string>();
   for (const [id, c] of wireCurrents) { if (Math.abs(c) > 1e-9) seeded.add(id); }
   const queue = Array.from(seeded);
+
   for (let i = 0; i < queue.length; i++) {
-    const wire = wireById.get(queue[i]); if (!wire) continue;
-    const current = wireCurrents.get(wire.id)!;
-    for (const other of circuit.wires) {
-      if (seeded.has(other.id)) continue;
-      const connected = wire.points.some(p => other.points.some(q => dist(p, q) < GRID * 0.6));
-      if (connected) {
-        wireCurrents.set(other.id, current);
-        seeded.add(other.id);
-        queue.push(other.id);
-      }
+    const wireA = wireById.get(queue[i]); if (!wireA) continue;
+    const I_A    = wireCurrents.get(wireA.id)!;
+    const firstA = wireA.points[0];
+    const lastA  = wireA.points[wireA.points.length - 1];
+
+    for (const wireB of circuit.wires) {
+      if (seeded.has(wireB.id)) continue;
+      const firstB = wireB.points[0];
+      const lastB  = wireB.points[wireB.points.length - 1];
+
+      // Trouver le point de jonction partagé (bout-à-bout uniquement)
+      let pIsLastA  = false;
+      let pIsFirstB = false;
+      let found     = false;
+
+      if      (dist(lastA,  firstB) < GRID * 0.6) { pIsLastA = true;  pIsFirstB = true;  found = true; }
+      else if (dist(lastA,  lastB)  < GRID * 0.6) { pIsLastA = true;  pIsFirstB = false; found = true; }
+      else if (dist(firstA, firstB) < GRID * 0.6) { pIsLastA = false; pIsFirstB = true;  found = true; }
+      else if (dist(firstA, lastB)  < GRID * 0.6) { pIsLastA = false; pIsFirstB = false; found = true; }
+
+      if (!found) continue;
+
+      // I_A > 0 → dots vont points[0]→last → arrivent à lastA
+      // I_A < 0 → dots vont points[last]→0 → arrivent à firstA
+      const arrivesAtJunction = (I_A > 0 && pIsLastA) || (I_A < 0 && !pIsLastA);
+
+      // Sur wireB : si le courant arrive à la jonction depuis A, il doit en repartir sur B.
+      //   Repartir = s'éloigner de la jonction sur B.
+      //   pIsFirstB → jonction = points[0] de B → repartir = I_B > 0
+      //   !pIsFirstB → jonction = points[last] de B → repartir = I_B < 0
+      const signB = (arrivesAtJunction === pIsFirstB) ? 1 : -1;
+
+      wireCurrents.set(wireB.id, signB * Math.abs(I_A));
+      seeded.add(wireB.id);
+      queue.push(wireB.id);
     }
   }
 
