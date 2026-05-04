@@ -3,8 +3,9 @@ import { Battery } from '../element/Battery.ts';
 import { Capacitor } from '../element/Capacitor.ts';
 import { Component, StampContext } from '../element/Component.ts';
 import { Inductor } from '../element/Inductor.ts';
-import { Led } from '../element/Led.ts';
 import { VoltageSource } from '../element/VoltageSource.ts';
+import { Led } from '../element/Led.ts';
+import { Switch } from '../element/Switch.ts';
 
 export interface TransientSolveOptions {
     timeStep?: number;
@@ -29,15 +30,15 @@ interface SolveResult {
 export class MnaSolver {
     solve(components: Component[], options: TransientSolveOptions = {}): SolveResult {
         const nodeSet = new Set<number>();
-        // tout ce qui a besoin d'une ligne MNA extra
-        const voltageSources: (VoltageSource | Battery | Led | Inductor)[] = [];
+        // Led n'est plus ici — elle utilise un équivalent Norton (pas de ligne extra)
+        const voltageSources: (VoltageSource | Battery | Inductor)[] = [];
         let hasCapacitor = false;
 
         components.forEach(component => {
             if (component.node1 !== 0) nodeSet.add(component.node1);
             if (component.node2 !== 0) nodeSet.add(component.node2);
 
-            if (component instanceof VoltageSource || component instanceof Battery || component instanceof Led || component instanceof Inductor) {
+            if (component instanceof VoltageSource || component instanceof Battery || component instanceof Inductor) {
                 voltageSources.push(component);
             }
 
@@ -124,7 +125,7 @@ export class MnaSolver {
         return Matrix.columnVector(initialSolutionVector);
     }
 
-    private formatResult(solution: Matrix, nodes: number[], voltageSources: (VoltageSource | Battery | Led | Inductor)[]): SolveResult {
+    private formatResult(solution: Matrix, nodes: number[], voltageSources: (VoltageSource | Battery | Inductor)[]): SolveResult {
         const solutionVector = solution.to1DArray();
         const nodeVoltages: Record<string, number> = {};
         const sourceCurrents: Record<string, number> = {};
