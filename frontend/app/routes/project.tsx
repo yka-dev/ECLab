@@ -2386,6 +2386,64 @@ function Palette({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ─── CIRCUITS EXEMPLES ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface ExampleCircuit { label: string; circuit: Circuit; }
+
+const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
+  {
+    label: "LED + Interrupteur",
+    circuit: {
+      components: [
+        // Source 5 V  (bornes : haut=+, bas=-)
+        { id:"ex_v",   type:"vsource",  position:{ x:192, y:144 }, rotation:0,   props:{ voltage:5 } },
+        // Interrupteur (ouvert par défaut)
+        { id:"ex_sw",  type:"switch",   position:{ x:288, y:96  }, rotation:0,   props:{ closed:false } },
+        // Résistance de protection 220 Ω
+        { id:"ex_r",   type:"resistor", position:{ x:432, y:96  }, rotation:0,   props:{ resistance:220 } },
+        // LED rouge Vf = 2 V
+        { id:"ex_led", type:"led",      position:{ x:576, y:96  }, rotation:0,   props:{ color:"red", forwardVoltage:2.0 } },
+        // Masse
+        { id:"ex_gnd", type:"ground",   position:{ x:408, y:312 }, rotation:0,   props:{} },
+      ] as Component[],
+      wires: [
+        // V+ (192,96) → SW gauche (240,96)
+        { id:"ex_w1", points:[{ x:192, y:96  }, { x:240, y:96  }] },
+        // SW droite (336,96) → R gauche (384,96)
+        { id:"ex_w2", points:[{ x:336, y:96  }, { x:384, y:96  }] },
+        // R droite (480,96) → LED anode (528,96)
+        { id:"ex_w3", points:[{ x:480, y:96  }, { x:528, y:96  }] },
+        // LED cathode (624,96) → bas (624,288) → GND (408,288)
+        { id:"ex_w4", points:[{ x:624, y:96  }, { x:624, y:288 }, { x:408, y:288 }] },
+        // V- (192,192) → bas (192,288) → GND (408,288)
+        { id:"ex_w5", points:[{ x:192, y:192 }, { x:192, y:288 }, { x:408, y:288 }] },
+        // V+ côté gauche : V borne haute (192,96) déjà dans w1
+      ],
+    },
+  },
+  {
+    label: "RC — charge condensateur",
+    circuit: {
+      components: [
+        { id:"rc_v",   type:"vsource",  position:{ x:192, y:144 }, rotation:0,   props:{ voltage:5 } },
+        { id:"rc_sw",  type:"switch",   position:{ x:288, y:96  }, rotation:0,   props:{ closed:false } },
+        { id:"rc_r",   type:"resistor", position:{ x:432, y:96  }, rotation:0,   props:{ resistance:1000 } },
+        { id:"rc_c",   type:"capacitor",position:{ x:576, y:192 }, rotation:90,  props:{ capacitance:1e-6 } },
+        { id:"rc_gnd", type:"ground",   position:{ x:408, y:312 }, rotation:0,   props:{} },
+      ] as Component[],
+      wires: [
+        { id:"rc_w1", points:[{ x:192, y:96  }, { x:240, y:96  }] },
+        { id:"rc_w2", points:[{ x:336, y:96  }, { x:384, y:96  }] },
+        { id:"rc_w3", points:[{ x:480, y:96  }, { x:576, y:96  }, { x:576, y:144 }] },
+        { id:"rc_w4", points:[{ x:576, y:240 }, { x:576, y:288 }, { x:408, y:288 }] },
+        { id:"rc_w5", points:[{ x:192, y:192 }, { x:192, y:288 }, { x:408, y:288 }] },
+      ],
+    },
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── TOOLBAR ─────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2398,8 +2456,10 @@ interface ToolbarProps {
 
 function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
   const dark = state.darkMode;
-  const bg = dark ? "#0e1120" : "#ffffff";
-  const bdr = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const bg   = dark ? "#0e1120" : "#ffffff";
+  const bdr  = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const [exOpen, setExOpen] = useState(false);
+
   const btn: React.CSSProperties = {
     background: "transparent",
     border: "none",
@@ -2421,6 +2481,14 @@ function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
     if (!window.confirm("Êtes-vous sûr de vouloir tout effacer ?")) return;
     dispatch({ type: "LOAD", components: [], wires: [] });
     dispatch({ type: "SELECT", ids: [] });
+  };
+
+  const loadExample = (ex: ExampleCircuit) => {
+    const isEmpty = state.components.length === 0 && state.wires.length === 0;
+    if (!isEmpty && !window.confirm(`Charger "${ex.label}" ? Le circuit actuel sera remplacé.`)) return;
+    dispatch({ type:"LOAD", components: ex.circuit.components, wires: ex.circuit.wires });
+    dispatch({ type:"SELECT", ids:[] });
+    setExOpen(false);
   };
 
   return (
@@ -2472,19 +2540,50 @@ function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
         {UI.netlistBtn}
       </button>
       <div style={sep} />
-      <button style={{ ...btn, color: "#dc2626" }} onClick={handleClear}>
-        {UI.clearBtn}
-      </button>
-      <div style={{ flex: 1 }} />
-      <span
-        style={{
-          fontSize: 10,
-          color: dark ? "#3a4060" : "#9ca3af",
-          fontFamily: "monospace",
-        }}
-      >
-        {Math.round(cam.z * 100)}%
-      </span>
+
+      {/* ── Bouton Exemples ───────────────────────────────────────────────── */}
+      <div style={{ position:"relative" }}>
+        <button
+          style={{ ...btn, color:"#7c3aed", fontWeight:600 }}
+          onClick={() => setExOpen(o => !o)}
+        >
+          ⚡ Exemple {exOpen ? "▲" : "▼"}
+        </button>
+        {exOpen && (
+          <div
+            style={{
+              position:"absolute", top:"100%", left:0, zIndex:500,
+              background: dark?"#0f172a":"#ffffff",
+              border: dark?"1px solid #1e293b":"1px solid #e5e7eb",
+              borderRadius:8, boxShadow:"0 8px 24px rgba(0,0,0,.18)",
+              minWidth:220, padding:"6px 0", marginTop:4,
+            }}
+          >
+            {EXAMPLE_CIRCUITS.map(ex => (
+              <button
+                key={ex.label}
+                onClick={() => loadExample(ex)}
+                style={{
+                  display:"block", width:"100%", textAlign:"left",
+                  background:"transparent", border:"none", cursor:"pointer",
+                  padding:"8px 14px", fontSize:11,
+                  fontFamily:"'JetBrains Mono',monospace",
+                  color: dark?"#94a3b8":"#374151",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = dark?"#1e293b":"#f3f4f6")}
+                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+              >
+                {ex.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={sep} />
+      <button style={{ ...btn, color:"#dc2626" }} onClick={handleClear}>{UI.clearBtn}</button>
+      <div style={{ flex:1 }} />
+      <span style={{ fontSize:10, color:dark?"#3a4060":"#9ca3af", fontFamily:"monospace" }}>{Math.round(cam.z*100)}%</span>
     </div>
   );
 }
@@ -2552,16 +2651,29 @@ function computeCircuitCurrents(
     const v2 = n2 === "0" ? 0 : (simResult.nodeVoltages[`node${n2}`] ?? 0);
     let I = 0;
     switch (comp.type) {
-      case "resistor":
-        I = (v1 - v2) / ((comp.props.resistance as number) || 1);
-        break;
-      case "switch":
-        I = (comp.props.closed as boolean) ? (v1 - v2) / 0.001 : 0;
-        break;
-      case "vsource":
-      case "led": {
+      case "resistor": I = (v1 - v2) / ((comp.props.resistance as number) || 1); break;
+      case "switch":   I = (comp.props.closed as boolean) ? (v1 - v2) / 0.001 : 0; break;
+      case "vsource": {
+        // Convention MNA : la variable J dans la matrice est telle que
+        //   J = courant "quittant n1 via la branche source" dans Gx=b.
+        // Pour une source qui fournit du courant, J < 0
+        //   (5mA quittent n1 via résistance → J = -5mA pour équilibrer KCL).
+        //
+        // On utilise J directement (SANS négation) :
+        //   I = J < 0  →  dots de T1(−) vers T0(+) sur le corps de la source ✓
+        //               →  formule de signe sur les fils cohérente avec les passifs ✓
         const name = componentNames.get(comp.id);
-        I = name ? -(simResult.sourceCurrents[name] ?? 0) : 0;
+        I = name ? (simResult.sourceCurrents[name] ?? 0) : 0;
+        break;
+      }
+      case "led": {
+        // Modèle Norton (Led.ts) : I = (V_n1 - V_n2 - Vf) / Rs
+        // Courant positif = sens direct (anode terminal[0] → cathode terminal[1]).
+        // Courant négatif ou nul = LED bloquée ou inversée → on clamp à 0.
+        const vf = comp.props.forwardVoltage as number;
+        const rs = 10; // seriesResistance dans Led.ts (défaut)
+        const raw = (v1 - v2 - vf) / rs;
+        I = raw > 0 ? raw : 0;
         break;
       }
       default:
@@ -2570,48 +2682,98 @@ function computeCircuitCurrents(
     componentCurrents.set(comp.id, I);
   }
 
-  // ── Passe 1 : fils touchant une borne de composant ────────────────────────────
+  // ── Passe 1 : fils touchant une borne de composant (direction correcte) ────────
+  //
+  // Règle de signe :
+  //   I_comp > 0  ↔  courant conventionnel de T0 → T1 à travers le composant.
+  //
+  //   Au terminal T0 (entrée) : le courant entre dans le composant
+  //     → le fil doit amener les dots VERS T0
+  //   Au terminal T1 (sortie) : le courant sort du composant
+  //     → le fil doit emmener les dots LOIN de T1
+  //
+  //   wireEndIdx = 0  si points[0]    est près du terminal
+  //   wireEndIdx = 1  si points[last] est près du terminal
+  //
+  //   sign = termIdx !== wireEndIdx ? +1 : -1
+  //   (quand le bout de connexion est "à l'opposé" du sens naturel du fil, on garde;
+  //    sinon on inverse)
   const wireCurrents = new Map<string, number>();
   for (const wire of circuit.wires) {
-    const found: number[] = [];
+    let bestCurrent = 0;
+    let bestMag     = 0;
+    const firstPt   = wire.points[0];
+    const lastPt    = wire.points[wire.points.length - 1];
+
     for (const comp of circuit.components) {
-      const touches = termWorlds(comp).some((tw) =>
-        wire.points.some((wp) => dist(tw, wp) < GRID * 0.6),
-      );
-      if (touches) {
-        const c = componentCurrents.get(comp.id) ?? 0;
-        if (Math.abs(c) > 1e-9) found.push(c);
+      const terms  = termWorlds(comp);
+      const I_comp = componentCurrents.get(comp.id) ?? 0;
+      if (Math.abs(I_comp) < 1e-9) continue;
+
+      for (let termIdx = 0; termIdx < terms.length; termIdx++) {
+        const tw        = terms[termIdx];
+        const firstNear = dist(firstPt, tw) < GRID * 0.6;
+        const lastNear  = dist(lastPt,  tw) < GRID * 0.6;
+        if (!firstNear && !lastNear) continue;
+
+        const wireEndIdx = firstNear ? 0 : 1;
+        const sign       = termIdx !== wireEndIdx ? 1 : -1;
+        const signedI    = sign * I_comp;
+
+        if (Math.abs(signedI) > bestMag) {
+          bestMag     = Math.abs(signedI);
+          bestCurrent = signedI;
+        }
       }
     }
-    wireCurrents.set(
-      wire.id,
-      found.length > 0
-        ? found.reduce((a, b) => (Math.abs(a) >= Math.abs(b) ? a : b), 0)
-        : 0,
-    );
+    wireCurrents.set(wire.id, bestCurrent);
   }
 
-  // ── Passe 2 : propagation BFS aux fils intermédiaires ─────────────────────────
-  const wireById = new Map(circuit.wires.map((w) => [w.id, w]));
-  const seeded = new Set<string>();
-  for (const [id, c] of wireCurrents) {
-    if (Math.abs(c) > 1e-9) seeded.add(id);
-  }
+  // ── Passe 2 : propagation BFS aux fils intermédiaires (signe cohérent) ─────────
+  //
+  // On détermine si le courant du fil A ARRIVE au point de jonction ou en PART,
+  // puis on en déduit le signe correct pour le fil B connecté à ce point.
+  const wireById = new Map(circuit.wires.map(w => [w.id, w]));
+  const seeded   = new Set<string>();
+  for (const [id, c] of wireCurrents) { if (Math.abs(c) > 1e-9) seeded.add(id); }
   const queue = Array.from(seeded);
+
   for (let i = 0; i < queue.length; i++) {
-    const wire = wireById.get(queue[i]);
-    if (!wire) continue;
-    const current = wireCurrents.get(wire.id)!;
-    for (const other of circuit.wires) {
-      if (seeded.has(other.id)) continue;
-      const connected = wire.points.some((p) =>
-        other.points.some((q) => dist(p, q) < GRID * 0.6),
-      );
-      if (connected) {
-        wireCurrents.set(other.id, current);
-        seeded.add(other.id);
-        queue.push(other.id);
-      }
+    const wireA = wireById.get(queue[i]); if (!wireA) continue;
+    const I_A    = wireCurrents.get(wireA.id)!;
+    const firstA = wireA.points[0];
+    const lastA  = wireA.points[wireA.points.length - 1];
+
+    for (const wireB of circuit.wires) {
+      if (seeded.has(wireB.id)) continue;
+      const firstB = wireB.points[0];
+      const lastB  = wireB.points[wireB.points.length - 1];
+
+      // Trouver le point de jonction partagé (bout-à-bout uniquement)
+      let pIsLastA  = false;
+      let pIsFirstB = false;
+      let found     = false;
+
+      if      (dist(lastA,  firstB) < GRID * 0.6) { pIsLastA = true;  pIsFirstB = true;  found = true; }
+      else if (dist(lastA,  lastB)  < GRID * 0.6) { pIsLastA = true;  pIsFirstB = false; found = true; }
+      else if (dist(firstA, firstB) < GRID * 0.6) { pIsLastA = false; pIsFirstB = true;  found = true; }
+      else if (dist(firstA, lastB)  < GRID * 0.6) { pIsLastA = false; pIsFirstB = false; found = true; }
+
+      if (!found) continue;
+
+      // I_A > 0 → dots vont points[0]→last → arrivent à lastA
+      // I_A < 0 → dots vont points[last]→0 → arrivent à firstA
+      const arrivesAtJunction = (I_A > 0 && pIsLastA) || (I_A < 0 && !pIsLastA);
+
+      // Sur wireB : si le courant arrive à la jonction depuis A, il doit en repartir sur B.
+      //   Repartir = s'éloigner de la jonction sur B.
+      //   pIsFirstB → jonction = points[0] de B → repartir = I_B > 0
+      //   !pIsFirstB → jonction = points[last] de B → repartir = I_B < 0
+      const signB = (arrivesAtJunction === pIsFirstB) ? 1 : -1;
+
+      wireCurrents.set(wireB.id, signB * Math.abs(I_A));
+      seeded.add(wireB.id);
+      queue.push(wireB.id);
     }
   }
 
@@ -2637,6 +2799,8 @@ const LED_RGB: Record<string, [number, number, number]> = {
   yellow: [255, 230, 40],
   white: [255, 255, 255],
 };
+const LED_FADE_IN  = 4.0; // luminosité/seconde à l'allumage  (~250 ms pour 0→1)
+const LED_FADE_OUT = 2.5; // luminosité/seconde à l'extinction (~400 ms pour 1→0)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface AnimDot {
@@ -2690,18 +2854,12 @@ interface CurrentOverlayProps {
   active: boolean;
 }
 
-function CurrentOverlay({
-  wires,
-  components,
-  wireCurrents,
-  componentCurrents,
-  cam,
-  active,
-}: CurrentOverlayProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
-  const lastTsRef = useRef<number>(0);
-  const dotsRef = useRef<Map<string, AnimDot[]>>(new Map());
+function CurrentOverlay({ wires, components, wireCurrents, componentCurrents, cam, active }: CurrentOverlayProps) {
+  const canvasRef       = useRef<HTMLCanvasElement>(null);
+  const rafRef          = useRef<number>(0);
+  const lastTsRef       = useRef<number>(0);
+  const dotsRef         = useRef<Map<string, AnimDot[]>>(new Map());
+  const ledBrightnessRef = useRef<Map<string, number>>(new Map()); // compId → 0..1
 
   // refs toujours frais — pas besoin de relancer le RAF à chaque mise à jour
   const wiresRef = useRef(wires);
@@ -2738,6 +2896,7 @@ function CurrentOverlay({
 
     if (!active) {
       dotsRef.current.clear();
+      ledBrightnessRef.current.clear();
       const ctx = canvas.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
       return;
@@ -2758,53 +2917,46 @@ function CurrentOverlay({
 
       const cam = camRef.current;
 
-      // ── glow LED ─────────────────────────────────────────────────────────────
+      // ── glow LED avec transition progressive ─────────────────────────────────
       for (const comp of componentsRef.current) {
         if (comp.type !== "led") continue;
-        const I = componentCurrentsRef.current.get(comp.id) ?? 0;
-        if (Math.abs(I) < DOT_THRESHOLD) continue;
+
+        const I        = componentCurrentsRef.current.get(comp.id) ?? 0;
+        const lit      = Math.abs(I) >= DOT_THRESHOLD;
+        const prev     = ledBrightnessRef.current.get(comp.id) ?? 0;
+
+        // avancer la luminosité vers la cible (0 ou 1) à vitesse constante
+        const target   = lit ? 1 : 0;
+        const speed    = lit ? LED_FADE_IN : LED_FADE_OUT;
+        const brightness = lit
+          ? Math.min(1, prev + speed * dt)
+          : Math.max(0, prev - speed * dt);
+        ledBrightnessRef.current.set(comp.id, brightness);
+
+        if (brightness < 0.01) continue; // complètement éteinte — rien à dessiner
 
         const [r, g, b] =
           LED_RGB[(comp.props.color as string) ?? "red"] ?? LED_RGB.red;
         const center = w2s(comp.position.x, comp.position.y, cam);
         const radius = GRID * 3.8 * cam.z;
 
-        // pulse lent : oscille entre 0.55 et 1.0 à ~1.4 Hz
-        const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(ts * 0.009));
+        // pulse subtil quand la LED est bien allumée (breathing)
+        const pulse = 0.82 + 0.18 * (0.5 + 0.5 * Math.sin(ts * 0.009));
+        const b_eff = brightness * pulse; // opacité effective
 
         // halo ambiant large
-        const halo = ctx.createRadialGradient(
-          center.x,
-          center.y,
-          0,
-          center.x,
-          center.y,
-          radius,
-        );
-        halo.addColorStop(
-          0,
-          `rgba(${r},${g},${b},${(pulse * 0.75).toFixed(2)})`,
-        );
-        halo.addColorStop(
-          0.35,
-          `rgba(${r},${g},${b},${(pulse * 0.35).toFixed(2)})`,
-        );
-        halo.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        const halo = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, radius);
+        halo.addColorStop(0,    `rgba(${r},${g},${b},${(b_eff * 0.75).toFixed(2)})`);
+        halo.addColorStop(0.35, `rgba(${r},${g},${b},${(b_eff * 0.35).toFixed(2)})`);
+        halo.addColorStop(1,    `rgba(${r},${g},${b},0)`);
         ctx.fillStyle = halo;
         ctx.beginPath();
         ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
         ctx.fill();
 
         // point brillant central
-        const core = ctx.createRadialGradient(
-          center.x,
-          center.y,
-          0,
-          center.x,
-          center.y,
-          GRID * 0.8 * cam.z,
-        );
-        core.addColorStop(0, `rgba(255,255,255,${(pulse * 0.9).toFixed(2)})`);
+        const core = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, GRID * 0.8 * cam.z);
+        core.addColorStop(0, `rgba(255,255,255,${(b_eff * 0.92).toFixed(2)})`);
         core.addColorStop(1, `rgba(${r},${g},${b},0)`);
         ctx.fillStyle = core;
         ctx.beginPath();
@@ -3422,20 +3574,13 @@ export default function App() {
     [state.components, state.wires],
   );
 
-  const { wireCurrents, componentCurrents } = useMemo(
-    () =>
-      simResult && !simResult.error
-        ? computeCircuitCurrents(
-            { components: state.components, wires: state.wires },
-            liveNetlist,
-            simResult,
-          )
-        : {
-            wireCurrents: new Map<string, number>(),
-            componentCurrents: new Map<string, number>(),
-          },
-    [simResult, state.components, state.wires, liveNetlist],
-  );
+  const { wireCurrents, componentCurrents } = useMemo(() => {
+    const empty = { wireCurrents: new Map<string, number>(), componentCurrents: new Map<string, number>() };
+    if (!simResult || simResult.error) return empty;
+    // circuit invalide détecté en temps réel → pas d'animation de courant
+    if (liveNetlist.warnings.some(w => w.includes("flottant") || w.includes("masse"))) return empty;
+    return computeCircuitCurrents({ components: state.components, wires: state.wires }, liveNetlist, simResult);
+  }, [simResult, state.components, state.wires, liveNetlist]);
 
   const dark = state.darkMode;
   const empty = state.components.length === 0 && state.wires.length === 0;
@@ -3502,6 +3647,14 @@ export default function App() {
         nodeVoltages: {},
         sourceCurrents: {},
       });
+      return;
+    }
+    if (netlist.warnings.some(w => w.includes("masse"))) {
+      setSimResult({ error: "Aucun nœud de masse (GND) — ajoutez un composant Masse.", nodeVoltages: {}, sourceCurrents: {} });
+      return;
+    }
+    if (netlist.warnings.some(w => w.includes("flottant"))) {
+      setSimResult({ error: "Circuit ouvert — connectez tous les nœuds avant de simuler.", nodeVoltages: {}, sourceCurrents: {} });
       return;
     }
     setSimNetlist(netlist);
