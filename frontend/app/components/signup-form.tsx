@@ -36,7 +36,7 @@ export function SignupForm({
       return;
     }
 
-    fetch(`${import.meta.env.VITE_API_ENDPOINT}/auth/signup`, {
+    fetch(`/api/auth/signup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -48,7 +48,7 @@ export function SignupForm({
       }),
     }).then((response) => {
       if (!response.ok) {
-        response.text().then((err) => setError(error));
+        response.text().then((err) => setError(err));
         setLoading(false);
       } else {
         toast.success("Votre compte ECLab a été créé avec succès");
@@ -150,20 +150,6 @@ export function SignupForm({
           </CardContent>
         </Card>
       </div>
-      <FieldDescription className="px-6 text-center">
-        En cliquant sur continuer, vous acceptez nos{" "}
-        <a href="#">Conditions d&apos;utilisation</a> et{" "}
-        <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            alert("vous êtes pas assez important");
-          }}
-        >
-          Politique de confidentialité
-        </a>
-        .
-      </FieldDescription>
     </div>
   );
 }

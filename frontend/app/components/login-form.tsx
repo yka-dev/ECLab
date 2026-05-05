@@ -30,7 +30,7 @@ export function LoginForm({
     setError("");
     setLoading(true);
 
-    fetch(`${import.meta.env.VITE_API_ENDPOINT}/auth/login`, {
+    fetch(`/api/auth/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -127,20 +127,6 @@ export function LoginForm({
           </CardContent>
         </Card>
       </div>
-      <FieldDescription className="px-6 text-center">
-        En cliquant sur continuer, vous acceptez nos{" "}
-        <a href="#">Conditions d'utilisation</a> et notre{" "}
-        <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            alert("vous êtes pas assez important");
-          }}
-        >
-          Politique de confidentialité
-        </a>
-        .
-      </FieldDescription>
     </div>
   );
 }
