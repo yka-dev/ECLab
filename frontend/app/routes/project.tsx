@@ -126,6 +126,7 @@ interface SimResult {
 interface GraphConfig {
   id: string;
   componentName: string | null;
+  metric: "tension" | "courant";
 }
 
 type PropFieldType = "number" | "boolean" | "select";
@@ -2547,7 +2548,7 @@ function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
           style={{ ...btn, color:"#7c3aed", fontWeight:600 }}
           onClick={() => setExOpen(o => !o)}
         >
-          ⚡ Exemple {exOpen ? "▲" : "▼"}
+           Exemple {exOpen ? "▲" : "▼"}
         </button>
         {exOpen && (
           <div
@@ -3075,7 +3076,11 @@ interface GraphViewProps {
   simResult: SimResult | null;
   dark: boolean;
   onChangeComponent: (name: string | null) => void;
+  onChangeMetric: (m: "tension" | "courant") => void;
   onClose: () => void;
+  onExpand?: () => void;
+  /** true = rendu dans le modal agrandie (plus de place, fonte plus grande) */
+  enlarged?: boolean;
 }
 
 type SeriesData =
@@ -3090,240 +3095,542 @@ function GraphView({
   simResult,
   dark,
   onChangeComponent,
+  onChangeMetric,
   onClose,
+  onExpand,
+  enlarged = false,
 }: GraphViewProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef  = useRef<HTMLCanvasElement>(null);
+  // Fenêtre de vue sur l'axe du temps : null = vue complète automatique
+  const viewRef    = useRef<{ t0: number; t1: number } | null>(null);
+  const dragRef    = useRef<{ sx: number; savedT0: number; savedT1: number } | null>(null);
+  const seriesRef  = useRef<SeriesData>(null);
+  const drawFnRef  = useRef<() => void>(() => {});
+  const darkRef    = useRef(dark);
+  const enlargedRef = useRef(enlarged);
+  darkRef.current    = dark;
+  enlargedRef.current = enlarged;
 
-  // use liveNetlist for node IDs so they stay current as the circuit changes
+  // Pour déclencher un re-render quand l'utilisateur remet la vue complète
+  const [isFullView, setIsFullView] = useState(true);
+
   const nc = useMemo(
-    () =>
-      liveNetlist.components.find((c) => c.name === config.componentName) ??
-      null,
+    () => liveNetlist.components.find(c => c.name === config.componentName) ?? null,
     [liveNetlist, config.componentName],
   );
 
   const series: SeriesData = useMemo(() => {
     if (!nc || !simResult || simResult.error) return null;
-
     const voltage = (tp: { nodeVoltages: Record<string, number> }) => {
       const v1 = nc.n1 === "0" ? 0 : (tp.nodeVoltages[`node${nc.n1}`] ?? 0);
       const v2 = nc.n2 === "0" ? 0 : (tp.nodeVoltages[`node${nc.n2}`] ?? 0);
       return v1 - v2;
     };
-
-    if (simResult.timeSeries && simResult.timeSeries.length > 0) {
-      return {
-        kind: "ac",
-        points: simResult.timeSeries.map((tp) => ({
-          t: tp.time,
-          v: voltage(tp),
-        })),
-      };
-    }
-
-    const v1 =
-      nc.n1 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n1}`] ?? 0);
-    const v2 =
-      nc.n2 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n2}`] ?? 0);
+    if (simResult.timeSeries && simResult.timeSeries.length > 0)
+      return { kind: "ac", points: simResult.timeSeries.map(tp => ({ t: tp.time, v: voltage(tp) })) };
+    const v1 = nc.n1 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n1}`] ?? 0);
+    const v2 = nc.n2 === "0" ? 0 : (simResult.nodeVoltages[`node${nc.n2}`] ?? 0);
     return { kind: "dc", value: v1 - v2 };
   }, [nc, simResult]);
 
+  seriesRef.current = series;
+
+  // ── Série courant ─────────────────────────────────────────────────────────────
+  const currentSeries: SeriesData = useMemo(() => {
+    if (!nc || !simResult || simResult.error) return null;
+
+    // Calcule I à un instant donné
+    const getV = (tp: SimPoint, nId: string) =>
+      nId === "0" ? 0 : (tp.nodeVoltages[`node${nId}`] ?? 0);
+
+    const currentAt = (tp: SimPoint, prevTp?: SimPoint): number => {
+      const v1 = getV(tp, nc.n1);
+      const v2 = getV(tp, nc.n2);
+      const vd = v1 - v2;
+      switch (nc.type) {
+        case "R": return vd / (nc.value || 1);
+        case "C": {
+          if (!prevTp) return 0;
+          const dt = tp.time - prevTp.time;
+          if (dt <= 0) return 0;
+          const prevVd = getV(prevTp, nc.n1) - getV(prevTp, nc.n2);
+          return nc.value * (vd - prevVd) / dt;
+        }
+        case "L": return tp.sourceCurrents[nc.name] ?? 0;
+        // Convention MNA : J < 0 pour source fournissant du courant → négatif pour afficher +
+        case "V": return -(tp.sourceCurrents[nc.name] ?? 0);
+        case "D": return Math.max(0, (vd - nc.vf) / 10);
+        case "S": return nc.state ? vd / 0.001 : 0;
+        default:  return 0;
+      }
+    };
+
+    if (simResult.timeSeries && simResult.timeSeries.length > 0) {
+      const pts = simResult.timeSeries;
+      return {
+        kind: "ac",
+        points: pts.map((tp, i) => ({
+          t: tp.time,
+          v: currentAt(tp, i > 0 ? pts[i - 1] : undefined),
+        })),
+      };
+    }
+    const dcI = currentAt({
+      time: 0,
+      nodeVoltages:   simResult.nodeVoltages,
+      sourceCurrents: simResult.sourceCurrents,
+    });
+    return { kind: "dc", value: dcI };
+  }, [nc, simResult]);
+
+  // ── Sélection de la série active ──────────────────────────────────────────────
+  const activeSeries: SeriesData =
+    config.metric === "courant" ? currentSeries : series;
+
+  // ── Titres descriptifs ────────────────────────────────────────────────────────
+  const graphTitle = useMemo(() => {
+    if (!nc || !config.componentName) return "";
+    const n = config.componentName;
+    return ({
+      R: `Tension aux bornes de ${n}`,
+      C: `Tension aux bornes du condensateur ${n}`,
+      L: `Tension aux bornes de l'inductance ${n}`,
+      V: `Tension de la source ${n}`,
+      D: `Tension aux bornes de la DEL ${n}`,
+      S: `Tension aux bornes de l'interrupteur ${n}`,
+    } as Record<string, string>)[nc.type] ?? `Tension — ${n}`;
+  }, [nc, config.componentName]);
+
+  const currentTitle = useMemo(() => {
+    if (!nc || !config.componentName) return "";
+    const n = config.componentName;
+    return ({
+      R: `Courant traversant ${n}`,
+      C: `Courant traversant le condensateur ${n}`,
+      L: `Courant traversant l'inductance ${n}`,
+      V: `Courant débité par la source ${n}`,
+      D: `Courant traversant la DEL ${n}`,
+      S: `Courant traversant l'interrupteur ${n}`,
+    } as Record<string, string>)[nc.type] ?? `Courant — ${n}`;
+  }, [nc, config.componentName]);
+
+  const activeTitle = config.metric === "courant" ? currentTitle : graphTitle;
+
+  const graphTitleRef = useRef(graphTitle);
+  graphTitleRef.current = graphTitle;
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  const niceStep = (roughStep: number): number => {
+    const mag  = Math.pow(10, Math.floor(Math.log10(Math.abs(roughStep) || 1)));
+    const norm = roughStep / mag;
+    if (norm <= 1) return mag;
+    if (norm <= 2) return 2 * mag;
+    if (norm <= 5) return 5 * mag;
+    return 10 * mag;
+  };
+  const niceRange = (lo: number, hi: number, n: number) => {
+    const step = niceStep((hi - lo) / n || 1);
+    return { lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step };
+  };
+  const fmtV = (v: number): string => {
+    const a = Math.abs(v);
+    if (a === 0)   return "0";
+    if (a >= 1000) return (v / 1000).toPrecision(3) + "k";
+    if (a >= 1)    return v.toPrecision(3);
+    if (a >= 1e-3) return (v * 1000).toPrecision(3) + "m";
+    return v.toExponential(2);
+  };
+  // Choix de l'unité de temps selon l'amplitude totale de la série
+  const timeUnit = (span: number): { u: string; f: number } => {
+    if (span >= 1)    return { u: "s",  f: 1 };
+    if (span >= 1e-3) return { u: "ms", f: 1e3 };
+    return              { u: "µs", f: 1e6 };
+  };
+
+  // ── Fonction de dessin (ref) ──────────────────────────────────────────────────
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    if (W === 0 || H === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    const ctx = canvas.getContext("2d")!;
+    ctx.scale(dpr, dpr);
+
+    const isCurrentMetric = config.metric === "courant";
+    const lineCol  = isCurrentMetric ? "#16a34a" : "#2563eb"; // vert=courant, bleu=tension
+
+    const bg       = dark ? "#080a12" : "#f9fafb";
+    const textCol  = dark ? "#64748b" : "#6b7280";
+    const titleCol = dark ? "#94a3b8" : "#374151";
+    const gridCol  = dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.07)";
+    const axisCol  = dark ? "#334155" : "#d1d5db";
+    const fs       = enlarged ? 12 : 11;
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // ── Marges ────────────────────────────────────────────────────────────────
+    const mt = enlarged ? 34 : 26;
+    const mb = enlarged ? 48 : 40;
+    const mr = 14;
+    const ml = enlarged ? 72 : 62;
+    const pw = W - ml - mr;
+    const ph = H - mt - mb;
+
+    // ── État vide ─────────────────────────────────────────────────────────────
+    ctx.font = `${fs}px 'JetBrains Mono', monospace`;
+    if (!activeSeries || !config.componentName) {
+      ctx.fillStyle = textCol; ctx.textAlign = "center";
+      ctx.fillText(config.componentName ? UI.noData : UI.noCompSel, W/2, H/2);
+      return;
+    }
+
+    // ── Titre général ─────────────────────────────────────────────────────────
+    ctx.font = `bold ${fs}px 'JetBrains Mono', monospace`;
+    ctx.fillStyle = titleCol; ctx.textAlign = "center";
+    ctx.fillText(activeTitle, W/2, fs + 5);
+    ctx.font = `${fs}px 'JetBrains Mono', monospace`;
+
+    // ── Auto-échelle courant : choisir l'unité selon l'amplitude max ──────────
+    // rawPts contient les points bruts (en V ou en A selon la série active)
+    const rawPts = activeSeries.kind === "ac"
+      ? activeSeries.points
+      : [{ t: 0, v: activeSeries.value }];
+    const rawAbsMax = Math.max(...rawPts.map(p => Math.abs(p.v)), 0);
+
+    let yScaleFactor = 1, yUnit = "V", yVarLabel = "U";
+    if (isCurrentMetric) {
+      yVarLabel = "I";
+      if (rawAbsMax < 1e-3)      { yScaleFactor = 1e6;  yUnit = "µA"; }
+      else if (rawAbsMax < 1)    { yScaleFactor = 1e3;  yUnit = "mA"; }
+      else                       { yScaleFactor = 1;    yUnit = "A";  }
+    }
+    // Formater une valeur Y dans l'unité choisie
+    const fmtY = (raw: number) => {
+      const scaled = raw * yScaleFactor;
+      const a = Math.abs(scaled);
+      if (a === 0) return "0";
+      if (a >= 100) return scaled.toFixed(1);
+      if (a >= 10)  return scaled.toFixed(2);
+      return scaled.toPrecision(3);
+    };
+
+    // ── DC ────────────────────────────────────────────────────────────────────
+    if (activeSeries.kind === "dc") {
+      const val = activeSeries.value;
+      const disp = `Régime continu : ${fmtY(val)} ${yUnit}`;
+      ctx.fillStyle = textCol; ctx.textAlign = "center";
+      ctx.fillText(disp, W/2, mt + ph/2 - 8);
+      ctx.fillStyle = lineCol;
+      ctx.fillRect(ml, mt + ph/2 - 1, pw, 2);
+      ctx.save(); ctx.translate(fs + 2, mt + ph/2); ctx.rotate(-Math.PI/2);
+      ctx.textAlign = "center"; ctx.fillStyle = textCol;
+      ctx.fillText(`${isCurrentMetric ? "Courant" : "Tension"}  ${yVarLabel} (${yUnit})`, 0, 0);
+      ctx.restore();
+      return;
+    }
+
+    // ── AC ────────────────────────────────────────────────────────────────────
+    const pts    = activeSeries.points;
+    const fullT0 = pts[0].t;
+    const fullT1 = pts[pts.length - 1].t;
+    const span   = fullT1 - fullT0;
+
+    const vw = viewRef.current;
+    const t0 = vw ? Math.max(fullT0, vw.t0) : fullT0;
+    const t1 = vw ? Math.min(fullT1, vw.t1) : fullT1;
+
+    // Y : inclure 0 si valeurs du même signe
+    const rawMin = Math.min(...pts.map(p => p.v));
+    const rawMax = Math.max(...pts.map(p => p.v));
+    // Convertir en unité d'affichage pour les calculs d'axe
+    const dMin = rawMin * yScaleFactor;
+    const dMax = rawMax * yScaleFactor;
+    const { lo: yMin, hi: yMax, step: yStep } = niceRange(
+      dMin >= 0 ? 0 : dMin * 1.25,
+      dMax <= 0 ? 0 : dMax * 1.25,
+      enlarged ? 6 : 5,
+    );
+    const yRange = yMax - yMin || 1;
+    const { u: tU, f: tF } = timeUnit(span);
+
+    const toX = (t: number) => ml + ((t - t0) / (t1 - t0 || 1)) * pw;
+    // toY prend une valeur déjà en unité d'affichage
+    const toY = (d: number) => mt + (1 - (d - yMin) / yRange) * ph;
+
+    // ── Grille + ticks Y ──────────────────────────────────────────────────────
+    for (let v = yMin; v <= yMax + yStep * 0.01; v += yStep) {
+      const y = toY(v);
+      if (y < mt - 2 || y > mt + ph + 2) continue;
+      ctx.strokeStyle = gridCol; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(ml + pw, y); ctx.stroke();
+      const isZero = Math.abs(v) < yStep * 0.01;
+      ctx.fillStyle = isZero ? axisCol : textCol; ctx.textAlign = "right";
+      ctx.fillText(isZero ? "0" : fmtY(v / yScaleFactor), ml - 5, y + fs * 0.35);
+    }
+
+    // ── Ticks X ───────────────────────────────────────────────────────────────
+    const { lo: tMin, hi: tMax, step: tStep } = niceRange(t0, t1, enlarged ? 8 : 5);
+    for (let t = tMin; t <= tMax + tStep * 0.01; t += tStep) {
+      const x = toX(t);
+      if (x < ml - 2 || x > ml + pw + 2) continue;
+      ctx.strokeStyle = gridCol; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(x, mt); ctx.lineTo(x, mt + ph); ctx.stroke();
+      ctx.fillStyle = textCol; ctx.textAlign = "center";
+      ctx.fillText((t * tF).toPrecision(3), x, mt + ph + fs + 5);
+    }
+
+    // ── Ligne zéro si données bipolaires ──────────────────────────────────────
+    if (yMin < 0 && yMax > 0) {
+      const y0 = toY(0);
+      ctx.strokeStyle = axisCol; ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(ml, y0); ctx.lineTo(ml + pw, y0); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // ── Cadre des axes ────────────────────────────────────────────────────────
+    ctx.strokeStyle = axisCol; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ml, mt); ctx.lineTo(ml, mt + ph);
+    ctx.moveTo(ml, mt + ph); ctx.lineTo(ml + pw, mt + ph);
+    ctx.stroke();
+
+    // ── Label axe Y (tourné) ──────────────────────────────────────────────────
+    ctx.save();
+    ctx.translate(fs + 2, mt + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center"; ctx.fillStyle = textCol;
+    ctx.fillText(`${isCurrentMetric ? "Courant" : "Tension"}  ${yVarLabel} (${yUnit})`, 0, 0);
+    ctx.restore();
+
+    // ── Label axe X ───────────────────────────────────────────────────────────
+    ctx.fillStyle = textCol; ctx.textAlign = "center";
+    ctx.fillText(`Temps  t (${tU})`, ml + pw / 2, mt + ph + mb - 10);
+
+    // ── Courbe ────────────────────────────────────────────────────────────────
+    ctx.strokeStyle = lineCol;
+    ctx.lineWidth = enlarged ? 2 : 1.8;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.beginPath();
+    let first = true;
+    for (const p of pts) {
+      if (p.t < t0 - (t1 - t0) * 0.001 || p.t > t1 + (t1 - t0) * 0.001) continue;
+      const d = p.v * yScaleFactor;
+      if (first) { ctx.moveTo(toX(p.t), toY(d)); first = false; }
+      else ctx.lineTo(toX(p.t), toY(d));
+    }
+    ctx.stroke();
+
+    // ── Scrollbar indicatrice (si vue partielle) ──────────────────────────────
+    if (vw && span > 0 && (t0 > fullT0 + 1e-9 || t1 < fullT1 - 1e-9)) {
+      const sbY = mt + ph + mb - 5, sbH = 3;
+      ctx.fillStyle = dark ? "#1e293b" : "#e2e8f0";
+      ctx.fillRect(ml, sbY, pw, sbH);
+      const s0 = (t0 - fullT0) / span;
+      const s1 = (t1 - fullT0) / span;
+      ctx.fillStyle = lineCol + "99";
+      ctx.fillRect(ml + s0 * pw, sbY, (s1 - s0) * pw, sbH);
+    }
+  }, [activeSeries, dark, config.componentName, enlarged, activeTitle, config.metric]);
+
+  drawFnRef.current = draw;
+
+  // ── ResizeObserver — redessine à chaque resize ────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const ro = new ResizeObserver(() => drawFnRef.current());
+    ro.observe(canvas);
+    drawFnRef.current();
+    return () => ro.disconnect();
+  }, []);
 
-    const draw = () => {
-      const W = canvas.offsetWidth;
-      const H = canvas.offsetHeight;
-      if (W === 0 || H === 0) return;
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = W * dpr;
-      canvas.height = H * dpr;
-      const ctx = canvas.getContext("2d")!;
-      ctx.scale(dpr, dpr);
+  // ── Redessine quand les données / thème changent ──────────────────────────────
+  useEffect(() => { drawFnRef.current(); }, [draw]);
 
-      const bg = dark ? "#080a12" : "#f9fafb";
-      const textCol = dark ? "#475569" : "#9ca3af";
-      const lineCol = "#2563eb";
-      const gridCol = dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)";
-      const axisCol = dark ? "#1e293b" : "#e5e7eb";
+  // ── Interactions souris : défilement + glisser-déplacer ───────────────────────
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
 
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, W, H);
+    const getML = () => (enlargedRef.current ? 72 : 62);
+    const getMR = () => 14;
 
-      const mt = 14,
-        mr = 10,
-        mb = 26,
-        ml = 44;
-      const pw = W - ml - mr;
-      const ph = H - mt - mb;
+    // Wheel : défilement gauche/droite  |  Ctrl+Wheel : zoom temporal
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const s = seriesRef.current;
+      if (!s || s.kind !== "ac") return;
+      const pts    = s.points;
+      const fullT0 = pts[0].t;
+      const fullT1 = pts[pts.length - 1].t;
+      const cur    = viewRef.current ?? { t0: fullT0, t1: fullT1 };
+      const pw     = el.offsetWidth - getML() - getMR();
 
-      ctx.font = "9px 'JetBrains Mono', monospace";
-
-      // no data states
-      if (!series || !config.componentName) {
-        ctx.fillStyle = textCol;
-        ctx.textAlign = "center";
-        ctx.fillText(
-          config.componentName ? UI.noData : UI.noCompSel,
-          W / 2,
-          H / 2,
-        );
-        return;
+      if (e.ctrlKey || e.metaKey) {
+        // Zoom centré sur la position du curseur
+        const rect  = el.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left - getML()) / pw));
+        const pivot = cur.t0 + ratio * (cur.t1 - cur.t0);
+        const factor = e.deltaY > 0 ? 1.3 : 0.77;
+        const newSpan = Math.max((fullT1 - fullT0) * 0.005, (cur.t1 - cur.t0) * factor);
+        let nt0 = pivot - ratio * newSpan;
+        let nt1 = nt0 + newSpan;
+        if (nt0 < fullT0) { nt0 = fullT0; nt1 = nt0 + newSpan; }
+        if (nt1 > fullT1) { nt1 = fullT1; nt0 = nt1 - newSpan; }
+        nt0 = Math.max(fullT0, nt0);
+        viewRef.current = { t0: nt0, t1: Math.min(fullT1, nt1) };
+      } else {
+        // Défilement gauche / droite
+        const span  = cur.t1 - cur.t0;
+        const shift = span * (e.deltaY > 0 ? 0.15 : -0.15);
+        let nt0 = cur.t0 + shift;
+        if (nt0 < fullT0) nt0 = fullT0;
+        if (nt0 + span > fullT1) nt0 = fullT1 - span;
+        viewRef.current = { t0: nt0, t1: nt0 + span };
       }
-
-      // DC mode
-      if (series.kind === "dc") {
-        ctx.fillStyle = textCol;
-        ctx.textAlign = "center";
-        ctx.fillText(UI.dcResult(series.value), W / 2, H / 2 - 8);
-        ctx.fillStyle = lineCol;
-        ctx.fillRect(ml, mt + ph / 2 - 1, pw, 2);
-        return;
-      }
-
-      // AC line chart
-      const pts = series.points;
-      const minT = pts[0].t,
-        maxT = pts[pts.length - 1].t;
-      const rawMin = Math.min(...pts.map((p) => p.v));
-      const rawMax = Math.max(...pts.map((p) => p.v));
-      const range = rawMax - rawMin || 1;
-      const pad = range * 0.12;
-      const yMin = rawMin - pad,
-        yMax = rawMax + pad;
-      const yRange = yMax - yMin;
-
-      const toX = (t: number) => ml + ((t - minT) / (maxT - minT || 1)) * pw;
-      const toY = (v: number) => mt + (1 - (v - yMin) / yRange) * ph;
-
-      // y grid + ticks
-      const yTicks = 4;
-      for (let i = 0; i <= yTicks; i++) {
-        const v = yMin + (yRange * i) / yTicks;
-        const y = toY(v);
-        ctx.strokeStyle = gridCol;
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        ctx.moveTo(ml, y);
-        ctx.lineTo(ml + pw, y);
-        ctx.stroke();
-        ctx.fillStyle = textCol;
-        ctx.textAlign = "right";
-        ctx.fillText(v.toPrecision(3), ml - 4, y + 3);
-      }
-
-      // x ticks
-      const xTicks = 5;
-      for (let i = 0; i <= xTicks; i++) {
-        const t = minT + ((maxT - minT) * i) / xTicks;
-        const x = toX(t);
-        ctx.strokeStyle = gridCol;
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        ctx.moveTo(x, mt);
-        ctx.lineTo(x, mt + ph);
-        ctx.stroke();
-        ctx.fillStyle = textCol;
-        ctx.textAlign = "center";
-        ctx.fillText((t * 1000).toPrecision(3) + "ms", x, mt + ph + 14);
-      }
-
-      // axes
-      ctx.strokeStyle = axisCol;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(ml, mt);
-      ctx.lineTo(ml, mt + ph);
-      ctx.moveTo(ml, mt + ph);
-      ctx.lineTo(ml + pw, mt + ph);
-      ctx.stroke();
-
-      // data line
-      ctx.strokeStyle = lineCol;
-      ctx.lineWidth = 1.5;
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(toX(pts[0].t), toY(pts[0].v));
-      for (let i = 1; i < pts.length; i++)
-        ctx.lineTo(toX(pts[i].t), toY(pts[i].v));
-      ctx.stroke();
+      // Vérifier si on est revenu à la vue complète
+      const vw = viewRef.current;
+      const isNowFull = Math.abs(vw.t0 - fullT0) < 1e-9 && Math.abs(vw.t1 - fullT1) < 1e-9;
+      if (isNowFull) viewRef.current = null;
+      setIsFullView(viewRef.current === null);
+      drawFnRef.current();
     };
 
-    draw();
-    const ro = new ResizeObserver(draw);
-    ro.observe(canvas);
-    return () => ro.disconnect();
-  }, [series, dark, config.componentName]);
+    // Drag : clic + glisser pour panoramique
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const s = seriesRef.current;
+      if (!s || s.kind !== "ac") return;
+      const cur = viewRef.current;
+      if (!cur) {
+        const pts = s.points;
+        dragRef.current = { sx: e.clientX, savedT0: pts[0].t, savedT1: pts[pts.length - 1].t };
+      } else {
+        dragRef.current = { sx: e.clientX, savedT0: cur.t0, savedT1: cur.t1 };
+      }
+      e.preventDefault();
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragRef.current) return;
+      const s = seriesRef.current;
+      if (!s || s.kind !== "ac") return;
+      const pts    = s.points;
+      const fullT0 = pts[0].t;
+      const fullT1 = pts[pts.length - 1].t;
+      const { sx, savedT0, savedT1 } = dragRef.current;
+      const span = savedT1 - savedT0;
+      const pw   = el.offsetWidth - getML() - getMR();
+      const dt   = -((e.clientX - sx) / pw) * span;
+      let nt0 = savedT0 + dt;
+      if (nt0 < fullT0) nt0 = fullT0;
+      if (nt0 + span > fullT1) nt0 = fullT1 - span;
+      viewRef.current = { t0: nt0, t1: nt0 + span };
+      setIsFullView(false);
+      drawFnRef.current();
+    };
+    const onMouseUp = () => { dragRef.current = null; };
 
-  const bdr = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+    el.addEventListener("wheel",      onWheel,     { passive: false });
+    el.addEventListener("mousedown",  onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup",   onMouseUp);
+    return () => {
+      el.removeEventListener("wheel",      onWheel);
+      el.removeEventListener("mousedown",  onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup",   onMouseUp);
+    };
+  }, []); // refs uniquement → pas de stale closure
+
+  // ── Reset vue complète ────────────────────────────────────────────────────────
+  const handleResetView = useCallback(() => {
+    viewRef.current = null;
+    setIsFullView(true);
+    drawFnRef.current();
+  }, []);
+
+  // ── Rendu JSX ─────────────────────────────────────────────────────────────────
+  const bdr     = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
   const textCol = dark ? "#94a3b8" : "#374151";
-  const mutCol = dark ? "#475569" : "#9ca3af";
+  const mutCol  = dark ? "#475569" : "#9ca3af";
+  const fs      = enlarged ? 12 : 10;
+
+  const iconBtn = (title: string, onClick: () => void, label: string, active = false): React.ReactElement => (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        background: active ? (dark ? "#0f1f40" : "#eff6ff") : "transparent",
+        border: "none",
+        color: active ? "#2563eb" : mutCol,
+        cursor: "pointer",
+        fontSize: enlarged ? 13 : 12,
+        lineHeight: 1,
+        padding: "1px 5px",
+        borderRadius: 3,
+        flexShrink: 0,
+      }}
+    >{label}</button>
+  );
+
+  const activeU = config.metric === "tension";
+  const activeI = config.metric === "courant";
+
+  const metricTabStyle = (active: boolean, color: string): React.CSSProperties => ({
+    padding: "2px 8px",
+    fontSize: enlarged ? 11 : 10,
+    fontFamily: "'JetBrains Mono',monospace",
+    fontWeight: 700,
+    background: active ? color : "transparent",
+    color: active ? "#fff" : (dark ? "#475569" : "#9ca3af"),
+    border: `1px solid ${active ? color : (dark ? "#1e293b" : "#d1d5db")}`,
+    borderRadius: 3,
+    cursor: "pointer",
+    flexShrink: 0,
+    lineHeight: 1.4,
+  });
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        borderRight: bdr,
-        minWidth: 200,
-        flex: 1,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          padding: "3px 6px",
-          borderBottom: bdr,
-          flexShrink: 0,
-        }}
-      >
+    <div style={{ display: "flex", flexDirection: "column", borderRight: bdr, minWidth: enlarged ? 0 : 210, flex: 1, overflow: "hidden" }}>
+
+      {/* ── En-tête : sélecteur + toggle U/I + utilitaires ─── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 6px", borderBottom: bdr, flexShrink: 0 }}>
         <select
           value={config.componentName ?? ""}
-          onChange={(e) => onChangeComponent(e.target.value || null)}
+          onChange={e => onChangeComponent(e.target.value || null)}
           style={{
-            flex: 1,
+            flex: 1, minWidth: 0,
             background: dark ? "#0f172a" : "#f9fafb",
             border: dark ? "1px solid #1e293b" : "1px solid #d1d5db",
-            color: textCol,
-            borderRadius: 4,
-            fontSize: 10,
-            fontFamily: "'JetBrains Mono',monospace",
-            padding: "2px 4px",
+            color: textCol, borderRadius: 4,
+            fontSize: fs, fontFamily: "'JetBrains Mono',monospace", padding: "2px 4px",
           }}
         >
           <option value="">{UI.chooseComp}</option>
-          {liveNetlist.components.map((c) => (
-            <option key={c.name} value={c.name}>
-              {fmtNetlistComp(c)}
-            </option>
+          {liveNetlist.components.map(c => (
+            <option key={c.name} value={c.name}>{fmtNetlistComp(c)}</option>
           ))}
         </select>
-        <button
-          onClick={onClose}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: mutCol,
-            cursor: "pointer",
-            fontSize: 14,
-            lineHeight: 1,
-            padding: "1px 4px",
-            flexShrink: 0,
-          }}
-        >
-          ×
-        </button>
+
+        {/* ── Toggle U / I ── */}
+        <button onClick={() => onChangeMetric("tension")} title="Tension (V)"
+          style={metricTabStyle(activeU, "#2563eb")}>U</button>
+        <button onClick={() => onChangeMetric("courant")} title="Courant (A)"
+          style={metricTabStyle(activeI, "#16a34a")}>I</button>
+
+        {!isFullView && iconBtn("Vue complète (0 → fin)", handleResetView, "⟷")}
+        {onExpand && !enlarged && iconBtn("Agrandir le graphique", onExpand, "⤢")}
+        {iconBtn(enlarged ? "Fermer" : "Supprimer", onClose, "×")}
       </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <canvas
-          ref={canvasRef}
-          style={{ width: "100%", height: "100%", display: "block" }}
-        />
+
+      {/* ── Canvas ─── */}
+      <div style={{ flex: 1, minHeight: 0, cursor: "grab" }}>
+        <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
       </div>
     </div>
   );
@@ -3352,100 +3659,114 @@ function GraphPanel({
   onSimulate,
   onStop,
 }: GraphPanelProps) {
-  const [graphs, setGraphs] = useState<GraphConfig[]>([
-    { id: uid(), componentName: null },
-  ]);
-  const [open, setOpen] = useState(true);
+  const [graphs,     setGraphs]     = useState<GraphConfig[]>([{ id: uid(), componentName: null, metric: "tension" }]);
+  const [open,       setOpen]       = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const bg = dark ? "#0e1120" : "#fafafa";
-  const bdr = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
+  const bg     = dark ? "#0e1120" : "#fafafa";
+  const bdr    = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
   const mutCol = dark ? "#475569" : "#9ca3af";
 
-  const addGraph = () =>
-    setGraphs((prev) => [...prev, { id: uid(), componentName: null }]);
-  const removeGraph = (id: string) =>
-    setGraphs((prev) =>
-      prev.length > 1 ? prev.filter((g) => g.id !== id) : prev,
-    );
+  const addGraph = () => setGraphs(prev => [...prev, { id: uid(), componentName: null, metric: "tension" }]);
+  const removeGraph = (id: string) => {
+    setExpandedId(prev => prev === id ? null : prev);
+    setGraphs(prev => prev.length > 1 ? prev.filter(g => g.id !== id) : prev);
+  };
   const updateGraph = (id: string, componentName: string | null) =>
-    setGraphs((prev) =>
-      prev.map((g) => (g.id === id ? { ...g, componentName } : g)),
-    );
+    setGraphs(prev => prev.map(g => g.id === id ? { ...g, componentName } : g));
+  const updateGraphMetric = (id: string, metric: "tension" | "courant") =>
+    setGraphs(prev => prev.map(g => g.id === id ? { ...g, metric } : g));
+
+  const expandedGraph = graphs.find(g => g.id === expandedId) ?? null;
 
   return (
     <div style={{ flexShrink: 0, background: bg, borderTop: bdr }}>
-      {/* header */}
-      <div
-        style={{
-          height: 32,
-          display: "flex",
-          alignItems: "center",
-          padding: "0 10px",
-          gap: 8,
-        }}
-      >
-        <span
+
+      {/* ── Modal plein-écran ─────────────────────────────────────────── */}
+      {expandedGraph && (
+        <div
           style={{
-            fontSize: 9,
-            fontWeight: 700,
-            letterSpacing: "0.12em",
-            color: mutCol,
-            fontFamily: "monospace",
+            position: "fixed", inset: 0, zIndex: 1000,
+            background: dark ? "rgba(5,7,15,0.92)" : "rgba(0,0,0,0.55)",
+            display: "flex", alignItems: "center", justifyContent: "center",
           }}
+          onClick={() => setExpandedId(null)}
         >
-          📊 {UI.graphTitle}
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: "min(95vw, 960px)", height: "min(88vh, 620px)",
+              background: dark ? "#0b0e1a" : "#ffffff",
+              border: bdr, borderRadius: 10,
+              boxShadow: "0 24px 60px rgba(0,0,0,.5)",
+              display: "flex", flexDirection: "column", overflow: "hidden",
+            }}
+          >
+            <div style={{
+              height: 38, display: "flex", alignItems: "center",
+              padding: "0 14px", borderBottom: bdr, flexShrink: 0, gap: 8,
+            }}>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: mutCol, fontFamily: "monospace" }}>
+                 {UI.graphTitle} — Vue agrandie
+              </span>
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={() => setExpandedId(null)}
+                style={{ background: "transparent", border: "none", color: mutCol, cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "2px 6px" }}
+              >×</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <GraphView
+                key={expandedGraph.id + "_exp"}
+                config={expandedGraph}
+                liveNetlist={liveNetlist}
+                simNetlist={simNetlist}
+                simResult={simResult}
+                dark={dark}
+                enlarged={true}
+                onChangeComponent={name => updateGraph(expandedGraph.id, name)}
+                onChangeMetric={m  => updateGraphMetric(expandedGraph.id, m)}
+                onClose={() => setExpandedId(null)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── En-tête panneau ───────────────────────────────────────────── */}
+      <div style={{ height: 32, display: "flex", alignItems: "center", padding: "0 10px", gap: 8 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.12em", color: mutCol, fontFamily: "monospace" }}>
+          {UI.graphTitle}
         </span>
         <div style={{ flex: 1 }} />
         {simResult?.error && (
-          <span
-            style={{ fontSize: 9, color: "#dc2626", fontFamily: "monospace" }}
-          >
-            {UI.simErrPrefix}
-            {simResult.error}
+          <span style={{ fontSize: 9, color: "#dc2626", fontFamily: "monospace" }}>
+            {UI.simErrPrefix}{simResult.error}
           </span>
         )}
         <button
           onClick={simRunning ? onStop : onSimulate}
           style={{
-            fontSize: 10,
-            fontFamily: "'JetBrains Mono',monospace",
+            fontSize: 10, fontFamily: "'JetBrains Mono',monospace",
             background: simRunning ? "#7f1d1d" : "#1d4ed8",
-            color: "#fff",
-            border: "none",
-            borderRadius: 4,
-            padding: "3px 10px",
-            cursor: "pointer",
+            color: "#fff", border: "none", borderRadius: 4,
+            padding: "3px 10px", cursor: "pointer",
           }}
         >
           {simRunning ? UI.stop : UI.simulate}
         </button>
         <button
-          onClick={() => setOpen((o) => !o)}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: mutCol,
-            cursor: "pointer",
-            fontSize: 11,
-            fontFamily: "monospace",
-            padding: "0 4px",
-          }}
+          onClick={() => setOpen(o => !o)}
+          style={{ background: "transparent", border: "none", color: mutCol, cursor: "pointer", fontSize: 11, fontFamily: "monospace", padding: "0 4px" }}
         >
           {open ? "▼" : "▲"}
         </button>
       </div>
 
-      {/* graphs */}
+      {/* ── Graphiques ───────────────────────────────────────────────── */}
       {open && (
-        <div
-          style={{
-            height: 160,
-            display: "flex",
-            borderTop: bdr,
-            overflow: "hidden",
-          }}
-        >
-          {graphs.map((g) => (
+        <div style={{ height: 200, display: "flex", borderTop: bdr, overflow: "hidden" }}>
+          {graphs.map(g => (
             <GraphView
               key={g.id}
               config={g}
@@ -3453,24 +3774,19 @@ function GraphPanel({
               simNetlist={simNetlist}
               simResult={simResult}
               dark={dark}
-              onChangeComponent={(name) => updateGraph(g.id, name)}
+              onChangeComponent={name => updateGraph(g.id, name)}
+              onChangeMetric={m  => updateGraphMetric(g.id, m)}
               onClose={() => removeGraph(g.id)}
+              onExpand={() => setExpandedId(g.id)}
             />
           ))}
           <button
             onClick={addGraph}
             title="Ajouter un graphique"
             style={{
-              flexShrink: 0,
-              width: 36,
-              background: "transparent",
-              border: "none",
-              color: mutCol,
-              cursor: "pointer",
-              fontSize: 20,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              flexShrink: 0, width: 36, background: "transparent",
+              border: "none", color: mutCol, cursor: "pointer", fontSize: 20,
+              display: "flex", alignItems: "center", justifyContent: "center",
             }}
           >
             {UI.addGraph}
@@ -3798,8 +4114,7 @@ export default function App() {
                 textAlign: "center",
                 pointerEvents: "none",
               }}
-            >
-              <div style={{ fontSize: 36, opacity: 0.07 }}>⚡</div>
+            > 
               <div
                 style={{
                   fontSize: 11,
