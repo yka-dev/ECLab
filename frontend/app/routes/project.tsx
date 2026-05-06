@@ -2393,52 +2393,169 @@ function Palette({
 interface ExampleCircuit { label: string; circuit: Circuit; }
 
 const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
+  // ── 1. Résistances en série ─────────────────────────────────────────────
+  {
+    label: "Résistances en série — division de tension",
+    circuit: {
+      components: [
+        { id:"rs_v",   type:"vsource",  position:{ x:192, y:144 }, rotation:0, props:{ voltage:5 } },
+        { id:"rs_r1",  type:"resistor", position:{ x:336, y:96  }, rotation:0, props:{ resistance:1000 } },
+        { id:"rs_r2",  type:"resistor", position:{ x:480, y:96  }, rotation:0, props:{ resistance:2000 } },
+        { id:"rs_gnd", type:"ground",   position:{ x:360, y:312 }, rotation:0, props:{} },
+      ] as Component[],
+      wires: [
+        { id:"rs_w1", points:[{ x:192, y:96  }, { x:288, y:96  }] },
+        { id:"rs_w2", points:[{ x:384, y:96  }, { x:432, y:96  }] },
+        { id:"rs_w3", points:[{ x:528, y:96  }, { x:528, y:288 }, { x:360, y:288 }] },
+        { id:"rs_w4", points:[{ x:192, y:192 }, { x:192, y:288 }, { x:360, y:288 }] },
+      ],
+    },
+  },
+  // ── 2. Résistances en parallèle ─────────────────────────────────────────
+  {
+    label: "Résistances en parallèle — division de courant",
+    circuit: {
+      components: [
+        { id:"rp_v",   type:"vsource",  position:{ x:192, y:192 }, rotation:0,  props:{ voltage:5 } },
+        { id:"rp_r1",  type:"resistor", position:{ x:384, y:192 }, rotation:90, props:{ resistance:1000 } },
+        { id:"rp_r2",  type:"resistor", position:{ x:528, y:192 }, rotation:90, props:{ resistance:2000 } },
+        { id:"rp_gnd", type:"ground",   position:{ x:360, y:264 }, rotation:0,  props:{} },
+      ] as Component[],
+      wires: [
+        // Rail supérieur V+ : (192,144) — R1 haut (384,144) — R2 haut (528,144)
+        { id:"rp_w1", points:[{ x:192, y:144 }, { x:384, y:144 }, { x:528, y:144 }] },
+        // Rail inférieur GND : V- (192,240) — GND (360,240) — R1 bas (384,240) — R2 bas (528,240)
+        { id:"rp_w2", points:[{ x:192, y:240 }, { x:360, y:240 }, { x:384, y:240 }, { x:528, y:240 }] },
+      ],
+    },
+  },
+  // ── 3. Circuit RC — charge rapide (τ = 10 ms) ───────────────────────────
+  {
+    label: "Circuit RC — charge rapide (τ = 10 ms)",
+    circuit: {
+      components: [
+        { id:"rcf_v",   type:"vsource",   position:{ x:192, y:144 }, rotation:0,  props:{ voltage:5 } },
+        { id:"rcf_sw",  type:"switch",    position:{ x:288, y:96  }, rotation:0,  props:{ closed:true } },
+        { id:"rcf_r",   type:"resistor",  position:{ x:432, y:96  }, rotation:0,  props:{ resistance:1000 } },
+        { id:"rcf_c",   type:"capacitor", position:{ x:576, y:192 }, rotation:90, props:{ capacitance:10e-6 } },
+        { id:"rcf_gnd", type:"ground",    position:{ x:408, y:312 }, rotation:0,  props:{} },
+      ] as Component[],
+      wires: [
+        { id:"rcf_w1", points:[{ x:192, y:96  }, { x:240, y:96  }] },
+        { id:"rcf_w2", points:[{ x:336, y:96  }, { x:384, y:96  }] },
+        { id:"rcf_w3", points:[{ x:480, y:96  }, { x:576, y:96  }, { x:576, y:144 }] },
+        { id:"rcf_w4", points:[{ x:576, y:240 }, { x:576, y:288 }, { x:408, y:288 }] },
+        { id:"rcf_w5", points:[{ x:192, y:192 }, { x:192, y:288 }, { x:408, y:288 }] },
+      ],
+    },
+  },
+  // ── 4. Circuit RL — montée du courant (τ = 0.1 ms) ──────────────────────
+  {
+    label: "Circuit RL — montée du courant (τ = 0.1 ms)",
+    circuit: {
+      components: [
+        { id:"rl_v",   type:"vsource",  position:{ x:192, y:144 }, rotation:0, props:{ voltage:5 } },
+        { id:"rl_sw",  type:"switch",   position:{ x:288, y:96  }, rotation:0, props:{ closed:true } },
+        { id:"rl_r",   type:"resistor", position:{ x:432, y:96  }, rotation:0, props:{ resistance:100 } },
+        { id:"rl_l",   type:"inductor", position:{ x:576, y:96  }, rotation:0, props:{ inductance:10e-3 } },
+        { id:"rl_gnd", type:"ground",   position:{ x:408, y:288 }, rotation:0, props:{} },
+      ] as Component[],
+      wires: [
+        { id:"rl_w1", points:[{ x:192, y:96  }, { x:240, y:96  }] },
+        { id:"rl_w2", points:[{ x:336, y:96  }, { x:384, y:96  }] },
+        { id:"rl_w3", points:[{ x:480, y:96  }, { x:528, y:96  }] },
+        { id:"rl_w4", points:[{ x:624, y:96  }, { x:624, y:264 }, { x:408, y:264 }] },
+        { id:"rl_w5", points:[{ x:192, y:192 }, { x:192, y:264 }, { x:408, y:264 }] },
+      ],
+    },
+  },
+  // ── 5. Circuit RC avec switch — charge lente (τ = 1 s) ──────────────────
+  {
+    label: "Circuit RC avec switch — charge lente (τ = 1 s)",
+    circuit: {
+      components: [
+        { id:"rcs_v",   type:"vsource",   position:{ x:192, y:144 }, rotation:0,  props:{ voltage:5 } },
+        { id:"rcs_sw",  type:"switch",    position:{ x:288, y:96  }, rotation:0,  props:{ closed:false } },
+        { id:"rcs_r",   type:"resistor",  position:{ x:432, y:96  }, rotation:0,  props:{ resistance:10000 } },
+        { id:"rcs_c",   type:"capacitor", position:{ x:576, y:192 }, rotation:90, props:{ capacitance:100e-6 } },
+        { id:"rcs_gnd", type:"ground",    position:{ x:408, y:312 }, rotation:0,  props:{} },
+      ] as Component[],
+      wires: [
+        { id:"rcs_w1", points:[{ x:192, y:96  }, { x:240, y:96  }] },
+        { id:"rcs_w2", points:[{ x:336, y:96  }, { x:384, y:96  }] },
+        { id:"rcs_w3", points:[{ x:480, y:96  }, { x:576, y:96  }, { x:576, y:144 }] },
+        { id:"rcs_w4", points:[{ x:576, y:240 }, { x:576, y:288 }, { x:408, y:288 }] },
+        { id:"rcs_w5", points:[{ x:192, y:192 }, { x:192, y:288 }, { x:408, y:288 }] },
+      ],
+    },
+  },
+  // ── 6. Circuit multi-switch — deux branches contrôlées ──────────────────
+  {
+    label: "Circuit multi-switch — branches contrôlées",
+    circuit: {
+      components: [
+        { id:"ms_v",   type:"vsource",  position:{ x:96,  y:192 }, rotation:0, props:{ voltage:5 } },
+        { id:"ms_sw1", type:"switch",   position:{ x:288, y:144 }, rotation:0, props:{ closed:true } },
+        { id:"ms_r1",  type:"resistor", position:{ x:432, y:144 }, rotation:0, props:{ resistance:1000 } },
+        { id:"ms_sw2", type:"switch",   position:{ x:288, y:240 }, rotation:0, props:{ closed:false } },
+        { id:"ms_r2",  type:"resistor", position:{ x:432, y:240 }, rotation:0, props:{ resistance:2200 } },
+        { id:"ms_gnd", type:"ground",   position:{ x:288, y:384 }, rotation:0, props:{} },
+      ] as Component[],
+      wires: [
+        // V+ (96,144) → nœud (192,144) → SW1 gauche (240,144)
+        { id:"ms_w1", points:[{ x:96,  y:144 }, { x:192, y:144 }, { x:240, y:144 }] },
+        // Nœud V+ (192,144) ↓ → SW2 gauche (240,240)
+        { id:"ms_w2", points:[{ x:192, y:144 }, { x:192, y:240 }, { x:240, y:240 }] },
+        // SW1 droit (336,144) → R1 gauche (384,144)
+        { id:"ms_w3", points:[{ x:336, y:144 }, { x:384, y:144 }] },
+        // SW2 droit (336,240) → R2 gauche (384,240)
+        { id:"ms_w4", points:[{ x:336, y:240 }, { x:384, y:240 }] },
+        // Bus droit : R1 (480,144) → R2 (480,240) → GND (288,360)
+        { id:"ms_w5", points:[{ x:480, y:144 }, { x:480, y:240 }, { x:480, y:360 }, { x:288, y:360 }] },
+        // V- (96,240) → GND (288,360)
+        { id:"ms_w6", points:[{ x:96,  y:240 }, { x:96,  y:360 }, { x:288, y:360 }] },
+      ],
+    },
+  },
+  // ── 7. Circuit RLC — oscillations amorties ──────────────────────────────
+  {
+    label: "Circuit RLC — oscillations amorties",
+    circuit: {
+      components: [
+        { id:"rlc_v",   type:"vsource",   position:{ x:192, y:144 }, rotation:0,  props:{ voltage:10 } },
+        { id:"rlc_sw",  type:"switch",    position:{ x:288, y:96  }, rotation:0,  props:{ closed:true } },
+        { id:"rlc_r",   type:"resistor",  position:{ x:432, y:96  }, rotation:0,  props:{ resistance:10 } },
+        { id:"rlc_l",   type:"inductor",  position:{ x:576, y:96  }, rotation:0,  props:{ inductance:10e-3 } },
+        { id:"rlc_c",   type:"capacitor", position:{ x:672, y:192 }, rotation:90, props:{ capacitance:100e-6 } },
+        { id:"rlc_gnd", type:"ground",    position:{ x:432, y:312 }, rotation:0,  props:{} },
+      ] as Component[],
+      wires: [
+        { id:"rlc_w1", points:[{ x:192, y:96  }, { x:240, y:96  }] },
+        { id:"rlc_w2", points:[{ x:336, y:96  }, { x:384, y:96  }] },
+        { id:"rlc_w3", points:[{ x:480, y:96  }, { x:528, y:96  }] },
+        { id:"rlc_w4", points:[{ x:624, y:96  }, { x:672, y:96  }, { x:672, y:144 }] },
+        { id:"rlc_w5", points:[{ x:672, y:240 }, { x:672, y:288 }, { x:432, y:288 }] },
+        { id:"rlc_w6", points:[{ x:192, y:192 }, { x:192, y:288 }, { x:432, y:288 }] },
+      ],
+    },
+  },
+  // ── 8. LED + Interrupteur ────────────────────────────────────────────────
   {
     label: "LED + Interrupteur",
     circuit: {
       components: [
-        // Source 5 V  (bornes : haut=+, bas=-)
-        { id:"ex_v",   type:"vsource",  position:{ x:192, y:144 }, rotation:0,   props:{ voltage:5 } },
-        // Interrupteur (ouvert par défaut)
-        { id:"ex_sw",  type:"switch",   position:{ x:288, y:96  }, rotation:0,   props:{ closed:false } },
-        // Résistance de protection 220 Ω
-        { id:"ex_r",   type:"resistor", position:{ x:432, y:96  }, rotation:0,   props:{ resistance:220 } },
-        // LED rouge Vf = 2 V
-        { id:"ex_led", type:"led",      position:{ x:576, y:96  }, rotation:0,   props:{ color:"red", forwardVoltage:2.0 } },
-        // Masse
-        { id:"ex_gnd", type:"ground",   position:{ x:408, y:312 }, rotation:0,   props:{} },
+        { id:"ex_v",   type:"vsource",  position:{ x:192, y:144 }, rotation:0, props:{ voltage:5 } },
+        { id:"ex_sw",  type:"switch",   position:{ x:288, y:96  }, rotation:0, props:{ closed:false } },
+        { id:"ex_r",   type:"resistor", position:{ x:432, y:96  }, rotation:0, props:{ resistance:220 } },
+        { id:"ex_led", type:"led",      position:{ x:576, y:96  }, rotation:0, props:{ color:"red", forwardVoltage:2.0 } },
+        { id:"ex_gnd", type:"ground",   position:{ x:408, y:312 }, rotation:0, props:{} },
       ] as Component[],
       wires: [
-        // V+ (192,96) → SW gauche (240,96)
         { id:"ex_w1", points:[{ x:192, y:96  }, { x:240, y:96  }] },
-        // SW droite (336,96) → R gauche (384,96)
         { id:"ex_w2", points:[{ x:336, y:96  }, { x:384, y:96  }] },
-        // R droite (480,96) → LED anode (528,96)
         { id:"ex_w3", points:[{ x:480, y:96  }, { x:528, y:96  }] },
-        // LED cathode (624,96) → bas (624,288) → GND (408,288)
         { id:"ex_w4", points:[{ x:624, y:96  }, { x:624, y:288 }, { x:408, y:288 }] },
-        // V- (192,192) → bas (192,288) → GND (408,288)
         { id:"ex_w5", points:[{ x:192, y:192 }, { x:192, y:288 }, { x:408, y:288 }] },
-        // V+ côté gauche : V borne haute (192,96) déjà dans w1
-      ],
-    },
-  },
-  {
-    label: "RC — charge condensateur",
-    circuit: {
-      components: [
-        { id:"rc_v",   type:"vsource",  position:{ x:192, y:144 }, rotation:0,   props:{ voltage:5 } },
-        { id:"rc_sw",  type:"switch",   position:{ x:288, y:96  }, rotation:0,   props:{ closed:false } },
-        { id:"rc_r",   type:"resistor", position:{ x:432, y:96  }, rotation:0,   props:{ resistance:1000 } },
-        { id:"rc_c",   type:"capacitor",position:{ x:576, y:192 }, rotation:90,  props:{ capacitance:1e-6 } },
-        { id:"rc_gnd", type:"ground",   position:{ x:408, y:312 }, rotation:0,   props:{} },
-      ] as Component[],
-      wires: [
-        { id:"rc_w1", points:[{ x:192, y:96  }, { x:240, y:96  }] },
-        { id:"rc_w2", points:[{ x:336, y:96  }, { x:384, y:96  }] },
-        { id:"rc_w3", points:[{ x:480, y:96  }, { x:576, y:96  }, { x:576, y:144 }] },
-        { id:"rc_w4", points:[{ x:576, y:240 }, { x:576, y:288 }, { x:408, y:288 }] },
-        { id:"rc_w5", points:[{ x:192, y:192 }, { x:192, y:288 }, { x:408, y:288 }] },
       ],
     },
   },
@@ -2557,7 +2674,7 @@ function Toolbar({ state, dispatch, cam, onShowNetlist }: ToolbarProps) {
               background: dark?"#0f172a":"#ffffff",
               border: dark?"1px solid #1e293b":"1px solid #e5e7eb",
               borderRadius:8, boxShadow:"0 8px 24px rgba(0,0,0,.18)",
-              minWidth:220, padding:"6px 0", marginTop:4,
+              minWidth:300, padding:"6px 0", marginTop:4,
             }}
           >
             {EXAMPLE_CIRCUITS.map(ex => (
