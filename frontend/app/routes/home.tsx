@@ -192,7 +192,7 @@ export default function Home() {
                 <span className="h-3 w-3 rounded-full bg-[#28c840]" />
               </div>
               <img
-                src="/the one.png"
+                src="/the one croped.png"
                 alt="Aperçu du simulateur ECLab"
                 className="block h-auto w-full"
               />
