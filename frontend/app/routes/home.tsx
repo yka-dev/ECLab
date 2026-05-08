@@ -174,7 +174,7 @@ export default function Home() {
 
               <div className="mt-10 space-y-3">
                 {showcase.map(([number, title, text], index) => (
-                  <div key={title} className={`flex gap-4 rounded-xl border p-5 ${index === 0 ? "border-white bg-white text-zinc-950" : "border-white/10 bg-white/[0.03]"}`}>
+                  <div key={title} className={`flex gap-4 rounded-xl border p-5 border-white bg-white text-zinc-950`}>
                     <span className="font-mono text-sm text-zinc-500">{number}</span>
                     <div>
                       <h3 className="font-semibold">{title}</h3>
