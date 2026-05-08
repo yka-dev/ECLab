@@ -76,7 +76,7 @@ export const PROP_SCHEMAS: Record<ComponentType, ComponentPropertySchema> = {
   ground: {},
   switch: { closed: { label: "Fermé", type: "boolean", default: false } },
   led: {
-    color: { label: "Couleur LED", type: "select", default: "red", options: ["red", "green", "blue", "yellow", "white"] },
+    color: { label: "Couleur DEL", type: "select", default: "rouge", options: ["rouge", "vert", "bleu", "jaune", "blanc"] },
     forwardVoltage: { label: "Tension seuil Vf (V)", type: "number", default: 2.0, min: 0, step: 0.1 },
   },
   // ⚠️ TRANSISTOR FICTIF — pas de vraie simulation

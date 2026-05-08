@@ -147,7 +147,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
         { id:"ex_v",   type:"vsource",  position:{ x:192, y:144 }, rotation:0, props:{ voltage:5 } },
         { id:"ex_sw",  type:"switch",   position:{ x:288, y:96  }, rotation:0, props:{ closed:false } },
         { id:"ex_r",   type:"resistor", position:{ x:432, y:96  }, rotation:0, props:{ resistance:220 } },
-        { id:"ex_led", type:"led",      position:{ x:576, y:96  }, rotation:0, props:{ color:"red", forwardVoltage:2.0 } },
+        { id:"ex_led", type:"led",      position:{ x:576, y:96  }, rotation:0, props:{ color:"rouge", forwardVoltage:2.0 } },
         { id:"ex_gnd", type:"ground",   position:{ x:408, y:312 }, rotation:0, props:{} },
       ] as Component[],
       wires: [
@@ -172,7 +172,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
         { id:"and_rb2", type:"resistor",  position:{ x:384, y:336 }, rotation:0,  props:{ resistance:10000 } },
         { id:"and_q1",  type:"npn_ideal", position:{ x:528, y:192 }, rotation:0,  props:{ vbe_on:0.7, ron:10 } },
         { id:"and_q2",  type:"npn_ideal", position:{ x:528, y:288 }, rotation:0,  props:{ vbe_on:0.7, ron:10 } },
-        { id:"and_led", type:"led",       position:{ x:552, y:96  }, rotation:90, props:{ color:"red", forwardVoltage:2.0 } },
+        { id:"and_led", type:"led",       position:{ x:552, y:96  }, rotation:90, props:{ color:"rouge", forwardVoltage:2.0 } },
         { id:"and_gnd", type:"ground",    position:{ x:552, y:360 }, rotation:0,  props:{} },
       ] as Component[],
       wires: [
@@ -199,7 +199,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
         { id:"l8g4unp", type:"npn_ideal", position:{ x:48,  y:72  }, rotation:90,  props:{ vbe_on:0.7, ron:10 } },
         { id:"2q5x9gw", type:"resistor",  position:{ x:144, y:-24 }, rotation:90,  props:{ resistance:1000 } },
         { id:"9fvy9d6", type:"npn_ideal", position:{ x:216, y:72  }, rotation:90,  props:{ vbe_on:0.7, ron:10 } },
-        { id:"3lvsz7y", type:"led",       position:{ x:72,  y:192 }, rotation:180, props:{ color:"red", forwardVoltage:2 } },
+        { id:"3lvsz7y", type:"led",       position:{ x:72,  y:192 }, rotation:180, props:{ color:"rouge", forwardVoltage:2 } },
         { id:"og3ntnf", type:"ground",    position:{ x:-72, y:216 }, rotation:0,   props:{} },
       ] as Component[],
       wires: [

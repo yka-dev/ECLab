@@ -13,11 +13,11 @@ const DOT_SPACING     = 32;
 const DOT_THRESHOLD   = 3e-4;
 
 const LED_RGB: Record<string, [number, number, number]> = {
-  red:    [255,  50,  50],
-  green:  [ 50, 255,  80],
-  blue:   [ 50, 140, 255],
-  yellow: [255, 230,  40],
-  white:  [255, 255, 255],
+  rouge:  [255,  50,  50],
+  vert:   [ 50, 255,  80],
+  bleu:   [ 50, 140, 255],
+  jaune:  [255, 230,  40],
+  blanc:  [255, 255, 255],
 };
 const LED_FADE_IN  = 4.0;
 const LED_FADE_OUT = 2.5;
@@ -119,7 +119,7 @@ export function CurrentOverlay({ wires, components, wireCurrents, componentCurre
         ledBrightnessRef.current.set(comp.id, brightness);
         if (brightness < 0.01) continue;
 
-        const [r, g, b] = LED_RGB[(comp.props.color as string) ?? "red"] ?? LED_RGB.red;
+        const [r, g, b] = LED_RGB[(comp.props.color as string) ?? "rouge"] ?? LED_RGB.rouge;
         const center = w2s(comp.position.x, comp.position.y, cam);
         const radius = GRID * 3.8 * cam.z;
         const pulse  = 0.82 + 0.18 * (0.5 + 0.5 * Math.sin(ts * 0.009));
