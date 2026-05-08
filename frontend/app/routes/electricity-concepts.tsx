@@ -16,7 +16,7 @@ export function meta({}: Route.MetaArgs) {
 
 export default function ElectricityConcepts() {
   const mainRef = useRef<HTMLElement | null>(null);
-  const kirchhoffRef = useRef<HTMLElement | null>(null);
+  const kirchhoffRef = useRef<HTMLAnchorElement | null>(null);
   const [imageHeight, setImageHeight] = useState<number | null>(null);
 
   useEffect(() => {
@@ -121,11 +121,11 @@ export default function ElectricityConcepts() {
               height: Math.max(((imageHeight ?? 520) / 2) - 96, 140),
             }}
           >
-            <div className="absolute inset-0 bg-gradient-to-l from-black via-black to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-l from-white via-white/95 to-transparent" />
             <img
-              src="/LOGO.png"
+              src="/Add%20a%20heading-2%201.svg"
               alt=""
-              className="relative h-auto w-[min(14rem,60%)] opacity-90 drop-shadow-[0_18px_30px_rgba(255,255,255,0.08)]"
+              className="relative h-auto w-[min(14rem,60%)] opacity-95 drop-shadow-[0_18px_30px_rgba(0,0,0,0.12)]"
             />
           </div>
 
