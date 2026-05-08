@@ -11,6 +11,8 @@ export abstract class Component {
     id: string;
     node1: number;
     node2: number;
+    /** Troisième borne — utilisée par les composants à 3 terminaux (BJT…). */
+    node3?: number;
 
     constructor(id: string, node1: number, node2: number) {
         this.id = id;
