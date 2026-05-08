@@ -136,13 +136,13 @@ export const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
   },
 
   led: {
-    label: "LED",
+    label: "DEL",
     symbol: "▶",
     color: "#9a3412",
     terminals: [{ x: -2, y: 0 }, { x: 2, y: 0 }],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.led),
     propDefs: [
-      { key: "color", label: "Couleur LED", type: "select", options: ["red", "green", "blue", "yellow", "white"] },
+      { key: "color", label: "Couleur DEL", type: "select", options: ["rouge", "vert", "bleu", "jaune", "blanc"] },
       { key: "forwardVoltage", label: "Tension seuil Vf (V)", type: "number", min: 0, step: 0.1 },
     ],
     draw(ctx, comp, sel, hov) {
