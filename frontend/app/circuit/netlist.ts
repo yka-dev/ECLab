@@ -170,7 +170,7 @@ export function fmtNetlistComp(nc: NetlistComponent): string {
     case "C": return `${nc.name} — ${fmtFarad(nc.value)}`;
     case "L": return `${nc.name} — ${fmtHenry(nc.value)}`;
     case "V": return `${nc.name} — ${nc.value}V`;
-    case "D": return `${nc.name} — LED ${nc.vf}V`;
+    case "D": return `${nc.name} — DEL ${nc.vf}V`;
     case "S": return `${nc.name} — ${nc.state ? UI.closed : UI.open}`;
     // ⚠️ TRANSISTOR FICTIF
     case "NPN_IDEAL": return `${nc.name} — NPN idéal`;
