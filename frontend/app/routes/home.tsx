@@ -257,7 +257,11 @@ export default function Home() {
       <footer className="border-t border-zinc-200 px-5 py-8 md:px-8">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 text-sm text-zinc-500 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-zinc-950 text-xs font-bold text-white">EC</span>
+            <img
+              src="/Add a heading-2 1.svg"
+              alt="ECLab"
+              className="h-10 w-auto"
+            />
             <span className="font-semibold text-zinc-950">ECLab</span>
             <span>© 2026 · Cégep Bois-de-Boulogne</span>
           </div>
