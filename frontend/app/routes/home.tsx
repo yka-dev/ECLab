@@ -62,7 +62,7 @@ const showcase = [
   ["01", "Grille intelligente", "Snap automatique au pas de grille pour des schémas alignés sans effort."],
   ["02", "Connexions automatiques", "ECLab détecte les jonctions et résout le circuit pendant que vous travaillez."],
   ["03", "Mesures en direct", "Placez des sondes de tension et de courant, puis lisez les valeurs instantanément."],
-  ["04", "Raccourcis clavier", "R pour résistance, C pour condensateur, et recherche rapide pour rester dans le flux."],
+  ["04", "Raccourcis clavier", "R pour pivoter les pièces, CTRL+Z pour annuler."],
 ];
 
 export default function Home() {
@@ -70,11 +70,12 @@ export default function Home() {
     <div className="min-h-svh bg-white text-zinc-950">
       <header className="sticky top-0 z-50 border-b border-zinc-200 bg-white/80 backdrop-blur-xl">
         <nav className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 md:px-8">
-          <Link to="/" className="flex items-center gap-3 font-semibold tracking-tight">
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-zinc-950 text-xs font-bold text-white">
-              EC
-            </span>
-            ECLab
+          <Link to="/" className="flex items-center">
+            <img
+              src="/Add a heading-2 1.svg"
+              alt="ECLab"
+              className="h-14 w-auto"
+            />
           </Link>
 
           <div className="hidden items-center gap-8 text-sm font-medium text-zinc-500 md:flex">
