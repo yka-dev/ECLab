@@ -9,9 +9,10 @@ interface ToolbarProps {
   cam: Camera;
   onShowNetlist: () => void;
   onExportJson: () => void;
+  onSaveAndExit: () => void;
 }
 
-export function Toolbar({ state, dispatch, cam, onShowNetlist, onExportJson }: ToolbarProps) {
+export function Toolbar({ state, dispatch, cam, onShowNetlist, onExportJson, onSaveAndExit }: ToolbarProps) {
   const dark = state.darkMode;
   const bg   = dark ? "#0e1120" : "#ffffff";
   const bdr  = dark ? "1px solid #1e293b" : "1px solid #e5e7eb";
@@ -84,6 +85,13 @@ export function Toolbar({ state, dispatch, cam, onShowNetlist, onExportJson }: T
       <button style={{ ...btn, color: "#dc2626" }} onClick={handleClear}>{UI.clearBtn}</button>
       <div style={{ flex: 1 }} />
       <span style={{ fontSize: 10, color: dark ? "#3a4060" : "#9ca3af", fontFamily: "monospace" }}>{Math.round(cam.z * 100)}%</span>
+      <div style={sep} />
+      <button
+        style={{ ...btn, color: "#ffffff", background: "#16a34a", fontWeight: 600, padding: "4px 12px", borderRadius: 5 }}
+        onClick={onSaveAndExit}
+      >
+        ↩ Sauvegarder et quitter
+      </button>
     </div>
   );
 }

@@ -10,7 +10,7 @@ import { createSimulationWorker } from "simulation";
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { getCookie } from "~/lib/utils";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useNavigate } from "react-router";
 
 import type { Vec2, Camera, Component, SimPoint, SimResult, Netlist, AppState } from "../circuit/types";
 import { UI } from "../circuit/constants";
@@ -75,6 +75,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 export default function App() {
   const loaderData = useLoaderData<typeof loader>();
+  const navigate   = useNavigate();
   const [state, dispatch] = useReducer(reducer, {
     components: loaderData.components ?? [],
     wires: loaderData.wires ?? [],
@@ -106,6 +107,18 @@ export default function App() {
     const a    = document.createElement("a");
     a.href = url; a.download = "circuit.json"; a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function handleSaveAndExit() {
+    if (loaderData.id !== "guest") {
+      await fetch(`/api/projects/circuit/${loaderData.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ circuit: { components: state.components, wires: state.wires } }),
+      });
+    }
+    navigate("/projects");
   }
 
   // simulation
@@ -268,6 +281,7 @@ export default function App() {
         cam={cam}
         onShowNetlist={() => setShowNetlist(true)}
         onExportJson={exportJson}
+        onSaveAndExit={handleSaveAndExit}
       />
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
