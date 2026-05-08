@@ -228,7 +228,7 @@ export default function Home() {
               <div className="mt-8 grid grid-cols-2 gap-3">
                 {[
                   ["4", "Étudiants"],
-                  ["30+", "Composants modélisés"],
+                  ["8", "Composants modélisés"],
                   ["100%", "Web · sans installation"],
                   ["∞", "Circuits possibles"],
                 ].map(([value, label]) => (
