@@ -61,7 +61,7 @@ const features = [
 const showcase = [
   ["01", "Grille intelligente", "Snap automatique au pas de grille pour des schémas alignés sans effort."],
   ["02", "Connexions automatiques", "ECLab détecte les jonctions et résout le circuit pendant que vous travaillez."],
-  ["03", "Mesures en direct", "Placez des sondes de tension et de courant, puis lisez les valeurs instantanément."],
+  ["03", "Mesures en direct", "Placez des composents électriques, puis lisez les valeurs instantanément."],
   ["04", "Raccourcis clavier", "R pour pivoter les pièces, CTRL+Z pour annuler."],
 ];
 
