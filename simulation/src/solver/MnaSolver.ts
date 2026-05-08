@@ -37,6 +37,7 @@ export class MnaSolver {
         components.forEach(component => {
             if (component.node1 !== 0) nodeSet.add(component.node1);
             if (component.node2 !== 0) nodeSet.add(component.node2);
+            if (component.node3 !== undefined && component.node3 !== 0) nodeSet.add(component.node3);
 
             if (component instanceof VoltageSource || component instanceof Battery || component instanceof Inductor) {
                 voltageSources.push(component);
