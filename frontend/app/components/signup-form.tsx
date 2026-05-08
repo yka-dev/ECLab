@@ -9,7 +9,7 @@ import {
   FieldSeparator,
 } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import logoImage from "/LOGO.png";
+import logoImage from "/Add a heading-2 1.svg";
 import { useState } from "react";
 import { toast } from "sonner";
 import { redirect, useNavigate } from "react-router";
@@ -140,11 +140,11 @@ export function SignupForm({
               </FieldDescription>
             </FieldGroup>
           </form>
-          <div className="relative hidden bg-black md:block">
+          <div className="relative hidden bg-white md:block">
             <img
               src={logoImage}
               alt="Image"
-              className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
+              className="absolute inset-0 h-full w-full object-contain p-8"
             />
           </div>
           </CardContent>

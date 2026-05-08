@@ -11,7 +11,7 @@ import {
   FieldLabel,
 } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import logoImage from "/LOGO.png";
+import logoImage from "/Add a heading-2 1.svg";
 
 export function ForgotPasswordForm({
   className,
@@ -88,11 +88,11 @@ export function ForgotPasswordForm({
                 </FieldDescription>
               </FieldGroup>
             </form>
-            <div className="relative hidden h-full min-h-96 bg-black md:block">
+            <div className="relative hidden h-full min-h-96 bg-white md:block">
               <img
                 src={logoImage}
                 alt="Image"
-                className="absolute inset-0 h-full w-full object-cover"
+                className="absolute inset-0 h-full w-full object-contain p-8"
               />
             </div>
           </CardContent>
