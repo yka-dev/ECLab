@@ -1,29 +1,25 @@
-import { Composant, ContexteStamp } from "./Component";
+import { Component, StampContext } from './Component';
 
-// Une source de courant ideale impose un courant constant dans la branche,
-// independamment de la tension a ses bornes.
-//
-// Dans la MNA, elle ne contribue qu'au vecteur b (aucune entree dans G ni C).
-// Convention de signe : le courant entre par node2 et sort par node1
-// (convention generateur, coherente avec la convention recepteur des resistances).
-//
-//   b[i1] -= courant   (le courant quitte le noeud node1)
-//   b[i2] += courant   (le courant arrive au noeud node2)
-export class CurrentSource extends Composant {
-  readonly courant: number;
 
-  constructor(id: string, node1: number, node2: number, courant: number) {
-    super(id, node1, node2);
-    this.courant = courant;
-  }
+export class CurrentSource extends Component {
+    current: number;
 
-  // N'estampille que b — une source de courant ideale n'a pas de resistance interne
-  // et n'ajoute donc aucune entree dans la matrice de conductance G.
-  stamp({ b, nodeIndexMap }: ContexteStamp): void {
-    const i1 = this.obtenirIndiceNoeud(this.node1, nodeIndexMap);
-    const i2 = this.obtenirIndiceNoeud(this.node2, nodeIndexMap);
+    constructor(id: string, node1: number, node2: number, current: number) {
+        super(id, node1, node2);
+        this.current = current;
+    }
 
-    if (i1 !== null) b.set(i1, 0, b.get(i1, 0) - this.courant);
-    if (i2 !== null) b.set(i2, 0, b.get(i2, 0) + this.courant);
-  }
+    stamp({ b, nodeIndexMap }: StampContext): void {
+        const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
+        const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
+
+        // le courant sort de node1 et entre dans node2
+        if (node1Index !== null) {
+            b.set(node1Index, 0, b.get(node1Index, 0) - this.current);
+        }
+
+        if (node2Index !== null) {
+            b.set(node2Index, 0, b.get(node2Index, 0) + this.current);
+        }
+    }
 }
