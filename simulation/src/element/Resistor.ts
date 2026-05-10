@@ -1,9 +1,6 @@
 import { Component, StampContext } from './Component';
 
-/**
- * Représente une résistance et ajoute sa contribution (conductance) à la matrice G
- * lors du 'stamp' pour l'analyse nodale modifiée (MNA).
- */
+// Une resistance ajoute sa conductance dans la matrice G.
 export class Resistor extends Component {
     resistance: number;
 

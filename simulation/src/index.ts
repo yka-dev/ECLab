@@ -1,7 +1,5 @@
-/**
- * Point d'entrée exporté du package : crée un Worker de simulation (module).
- */
 export function createSimulationWorker() {
+  // Cree le worker qui lance la simulation en arriere plan.
   return new Worker(
     new URL('./worker.ts', import.meta.url),
     { type: 'module' }

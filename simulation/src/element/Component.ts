@@ -11,7 +11,7 @@ export abstract class Component {
     id: string;
     node1: number;
     node2: number;
-    /** Troisième borne — utilisée par les composants à 3 terminaux (BJT…). */
+    // Troisieme borne pour les composants comme le transistor.
     node3?: number;
 
     constructor(id: string, node1: number, node2: number) {
@@ -21,6 +21,7 @@ export abstract class Component {
     }
 
     protected getNodeIndex(node: number, nodeIndexMap: Map<number, number>): number | null {
+        // Le noeud 0 est la masse, il n'a pas d'index dans la matrice.
         if (node === 0) {
             return null;
         }

@@ -1,6 +1,7 @@
 import { Component, StampContext } from './Component';
 
 
+// Une inductance utilise une ligne MNA pour suivre son courant.
 export class Inductor extends Component {
     inductance: number;
     private mnaRow: number | null = null;
@@ -22,7 +23,7 @@ export class Inductor extends Component {
         const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
         const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
 
-        // relie le courant de l'inducteur aux tensions des nodes (comme VoltageSource)
+        // Relie le courant de l'inducteur aux tensions des noeuds.
         if (node1Index !== null) {
             G.set(node1Index, this.mnaRow, 1);
             G.set(this.mnaRow, node1Index, 1);
@@ -33,8 +34,7 @@ export class Inductor extends Component {
             G.set(this.mnaRow, node2Index, -1);
         }
 
-        // l'inductance va dans C — c'est elle qui donne la dynamique temporelle
-        // v = L * di/dt  →  avec backward euler : L/dt dans la matrice C
+        // La valeur dans C donne la dynamique temporelle de l'inductance.
         C.set(this.mnaRow, this.mnaRow, this.inductance);
     }
 }

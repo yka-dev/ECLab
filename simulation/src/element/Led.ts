@@ -1,5 +1,6 @@
 import { Component, StampContext } from './Component';
 
+// Une LED est approximee par une resistance serie et une tension de seuil.
 export class Led extends Component {
     forwardVoltage: number;
     seriesResistance: number;
@@ -22,9 +23,9 @@ export class Led extends Component {
     stamp({ G, b, nodeIndexMap }: StampContext): void {
         const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
         const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
-        const g = 1 / this.seriesResistance; // 1/Rs
+        const g = 1 / this.seriesResistance;
 
-        // ── Résistance série Rs entre anode (n1) et cathode (n2) ──────────────
+        // Ajoute la resistance serie entre l'anode et la cathode.
         if (node1Index !== null) {
             G.set(node1Index, node1Index, G.get(node1Index, node1Index) + g);
         }
@@ -36,7 +37,7 @@ export class Led extends Component {
             G.set(node2Index, node1Index, G.get(node2Index, node1Index) - g);
         }
 
-
+        // Ajoute la tension de seuil dans le vecteur b.
         if (node1Index !== null) {
             b.set(node1Index, 0, b.get(node1Index, 0) + g * this.forwardVoltage);
         }

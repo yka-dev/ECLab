@@ -1,8 +1,6 @@
 import { Component, StampContext } from './Component';
 
-// Un fil c'est juste une résistance très très faible.
-// En vrai un fil a 0 ohm, mais dans le solver on peut pas diviser par zéro.
-// Donc par défaut on met 0.001 ohm, mais tu peux choisir ta propre valeur.
+// Un fil est modele par une resistance tres faible.
 export class Wire extends Component {
     resistance: number;
 

@@ -1,8 +1,6 @@
 import { Component, StampContext } from './Component';
 
-// Une batterie c'est une source de tension avec une résistance interne.
-// La résistance interne fait que la tension baisse un peu quand on tire du courant.
-// Ex: une pile AA a environ 0.1 ohm de résistance interne.
+// Une batterie est une source de tension avec une resistance interne.
 export class Battery extends Component {
     voltage: number;
     internalResistance: number;
@@ -26,7 +24,7 @@ export class Battery extends Component {
         const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
         const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
 
-        // on stamp la source de tension (comme VoltageSource)
+        // Ajoute la partie source de tension.
         if (node1Index !== null) {
             G.set(node1Index, this.mnaRow, 1);
             G.set(this.mnaRow, node1Index, 1);
@@ -39,8 +37,7 @@ export class Battery extends Component {
 
         b.set(this.mnaRow, 0, this.voltage);
 
-        // on stamp la résistance interne (comme Resistor)
-        // elle est en série donc entre node1 et node2
+        // Ajoute la resistance interne entre les deux bornes.
         const g = 1 / this.internalResistance;
 
         if (node1Index !== null) {

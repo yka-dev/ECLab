@@ -27,10 +27,14 @@ interface SolveResult {
     timeSeries?: TimePoint[];
 }
 
+// Le solveur utilise la methode MNA.
+// Chaque composant remplit une partie des matrices G, C et b.
+// Ensuite on resout le systeme pour obtenir les tensions des noeuds.
+// Si le circuit contient C ou L, on avance petit a petit dans le temps.
 export class MnaSolver {
     solve(components: Component[], options: TransientSolveOptions = {}): SolveResult {
         const nodeSet = new Set<number>();
-        // Led n'est plus ici — elle utilise un équivalent Norton (pas de ligne extra)
+        // Ces composants ajoutent une ligne en plus dans la matrice MNA.
         const voltageSources: (VoltageSource | Battery | Inductor)[] = [];
         let hasCapacitor = false;
 
@@ -58,6 +62,7 @@ export class MnaSolver {
         const C = Matrix.zeros(size, size);
         const b = Matrix.zeros(size, 1);
 
+        // Assigne une ligne aux sources qui imposent une tension ou un courant interne.
         voltageSources.forEach((vs, index) => {
             vs.setMnaRow(nodeCount + index);
         });
@@ -68,6 +73,7 @@ export class MnaSolver {
         });
 
         if (!hasCapacitor) {
+            // Sans composant dynamique, un seul calcul suffit.
             const solution = solve(G, b);
             return this.formatResult(solution, nodes, voltageSources);
         }
@@ -88,6 +94,7 @@ export class MnaSolver {
         const timeSeries: TimePoint[] = [];
 
         for (let step = 1; step <= stepCount; step += 1) {
+            // Backward Euler utilise l'etat precedent pour avancer dans le temps.
             const A = G.clone().add(C.clone().mul(1 / timeStep));
             const rhs = b.clone().add(C.mmul(previousSolution).mul(1 / timeStep));
             const solution = solve(A, rhs);

@@ -1,21 +1,12 @@
-// ⚠️ TRANSISTOR FICTIF — résultat attendu sans simulation réelle
-// Ce composant n'est PAS un vrai modèle BJT. Il simule un transistor NPN
-// comme un simple interrupteur commandé par V_BE :
-//   • V_BE ≥ Vbe_on  →  R_CE = Ron  (transistor passant, ~interrupteur fermé)
-//   • V_BE < Vbe_on  →  R_CE = 1 MΩ (transistor bloqué, ~interrupteur ouvert)
-// Aucun gain β, aucune source de courant, aucun modèle Ebers-Moll.
-// Avantage : toujours stable, jamais de courant parasite.
+// Ce NPN est un modele simple, pas un vrai modele BJT.
+// Il agit comme un interrupteur entre collecteur et emetteur.
 import { Component, StampContext } from './Component';
 
 export class IdealNpn extends Component {
     vbeOn: number;
     ron:   number;
 
-    /**
-     * État actuel :
-     *   true  = passant  (C-E court-circuité via Ron)
-     *   false = bloqué   (C-E quasi ouvert, 1 MΩ)
-     */
+    // true signifie passant, false signifie bloque.
     on: boolean = false;
 
     constructor(
@@ -37,11 +28,10 @@ export class IdealNpn extends Component {
         const nC = this.getNodeIndex(this.node2,  nodeIndexMap);
         const nE = this.getNodeIndex(this.node3!, nodeIndexMap);
 
-        // Fuite 1 MΩ sur B-E : permet de lire V_BE sans nœud flottant,
-        // sans introduire de courant mesurable dans le circuit.
+        // Petite fuite entre base et emetteur pour eviter un noeud flottant.
         this.#stampG(G, nB, nE, 1e-6);
 
-        // C-E : conductance forte si passant, quasi nulle si bloqué
+        // Le passage collecteur emetteur conduit beaucoup si le transistor est passant.
         const gCE = this.on ? 1 / this.ron : 1e-6;
         this.#stampG(G, nC, nE, gCE);
     }

@@ -13,10 +13,12 @@ export class Circuit {
     components: Component[] = [];
 
     addComponent(component: Component): void {
+        // Ajoute un composant dans le circuit courant.
         this.components.push(component);
     }
 
     static createSimpleTestCircuit(): Circuit {
+        // Circuit minimal pour verifier le solveur.
         const circuit = new Circuit();
         const V1 = new VoltageSource("V1", 1, 0, 10);
         const R1 = new Resistor("R1", 1, 0, 5);
@@ -26,6 +28,7 @@ export class Circuit {
     }
 
     static createComplexTestCircuit(): Circuit {
+        // Circuit resistif avec plusieurs noeuds.
         const circuit = new Circuit();
 
         const V1 = new VoltageSource("V1", 1, 0, 12);
@@ -48,13 +51,14 @@ export class Circuit {
         return circuit;
     }
 
-        static createLedCircuit(): Circuit {
+    static createLedCircuit(): Circuit {
+        // Circuit simple avec batterie, interrupteur, resistance et LED.
         const circuit = new Circuit();
 
-        const B1 = new Battery("B1", 1, 0, 9, 0.5);   // batterie 9V, 0.5 ohm interne
-        const S1 = new Switch("S1", 1, 2, true);        // switch fermé
-        const R1 = new Resistor("R1", 2, 3, 100);       // résistance de protection
-        const L1 = new Led("L1", 3, 0, 1.8, 'rouge');   // LED rouge, tension choisie manuellement : 1.8V
+        const B1 = new Battery("B1", 1, 0, 9, 0.5);
+        const S1 = new Switch("S1", 1, 2, true);
+        const R1 = new Resistor("R1", 2, 3, 100);
+        const L1 = new Led("L1", 3, 0, 1.8, 'rouge');
 
         circuit.addComponent(B1);
         circuit.addComponent(S1);
@@ -64,45 +68,43 @@ export class Circuit {
         return circuit;
     }
 
-    // batterie → switch → jonction → deux branches
-    // branche 1 : R1 + LED verte
-    // branche 2 : C1 + C2 + source de courant
     static createMixedCircuit(): Circuit {
+        // Circuit de test avec une branche LED et une branche capacitive.
         const circuit = new Circuit();
 
-                const B1   = new Battery("B1", 1, 0, 9, 0.5);
+        const B1   = new Battery("B1", 1, 0, 9, 0.5);
         const W1   = new Wire("W1", 1, 2);
         const S1   = new Switch("S1", 2, 3, true);
         const W2   = new Wire("W2", 3, 4);
 
-        // branche LED
+        // Branche LED.
         const W3   = new Wire("W3", 4, 5);
         const R1   = new Resistor("R1", 5, 6, 220);
         const W4   = new Wire("W4", 6, 7);
         const LED1 = new Led("LED1", 7, 8, 2.1, 'vert');
         const W5   = new Wire("W5", 8, 0);
 
-        // branche capacitors
+        // Branche capacitive.
         const W6   = new Wire("W6", 4, 9);
         const C1   = new Capacitor("C1", 9, 10, 100e-6);
         const W7   = new Wire("W7", 10, 11);
         const C2   = new Capacitor("C2", 11, 12, 47e-6);
         const W8   = new Wire("W8", 12, 13);
-const I1   = new CurrentSource("I1", 13, 0, 0.01);
+        const I1   = new CurrentSource("I1", 13, 0, 0.01);
 
         [B1, W1, S1, W2, W3, R1, W4, LED1, W5, W6, C1, W7, C2, W8, I1].forEach(c => circuit.addComponent(c));
 
         return circuit;
     }
 
-    // circuit RLC classique — la tension oscille avant de se stabiliser
     static createRlcCircuit(): Circuit {
+        // Circuit RLC pour tester la reponse dans le temps.
         const circuit = new Circuit();
 
         const V1 = new VoltageSource("V1", 1, 0, 10);
         const R1 = new Resistor("R1", 1, 2, 10);
-        const L1 = new Inductor("L1", 2, 3, 0.01);  // 10mH
-        const C1 = new Capacitor("C1", 3, 0, 100e-6); // 100µF
+        const L1 = new Inductor("L1", 2, 3, 0.01);
+        const C1 = new Capacitor("C1", 3, 0, 100e-6);
 
         circuit.addComponent(V1);
         circuit.addComponent(R1);
@@ -113,6 +115,7 @@ const I1   = new CurrentSource("I1", 13, 0, 0.01);
     }
 
     static createRcTestCircuit(): Circuit {
+        // Circuit RC pour verifier la charge du condensateur.
         const circuit = new Circuit();
 
         const V1 = new VoltageSource("V1", 1, 0, 10);

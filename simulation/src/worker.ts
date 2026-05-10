@@ -1,4 +1,3 @@
-// simulation — boucle continue jusqu'à réception de 'stop'
 import { MnaSolver } from './solver/MnaSolver';
 import { Resistor }      from './element/Resistor';
 import { Capacitor }     from './element/Capacitor';
@@ -15,16 +14,16 @@ let prevSolution: number[] | undefined = undefined;
 let currentTime = 0;
 
 let ledStates      = new Map<string, boolean>();
-// ⚠️ TRANSISTORS FICTIFS — état simple on/off
+// Garde l'etat marche arret des transistors simples.
 let idealNpnStates = new Map<string, boolean>();
 
-// ── Paramètres de simulation ──────────────────────────────────────────────────
+// Reglages de la simulation.
 const TIME_STEP   = 1e-4;
 const CHUNK_STEPS = 8;
 const CHUNK_DELAY = 60;
 
-// ── Construction des composants ───────────────────────────────────────────────
 function buildComponents(netlist: any[]): Component[] {
+    // Transforme la netlist recue en vrais objets de simulation.
     const out: Component[] = [];
     for (const nc of netlist) {
         const n1 = parseInt(nc.n1);
@@ -43,8 +42,8 @@ function buildComponents(netlist: any[]): Component[] {
                 break;
             }
             case 'S': out.push(new Switch(nc.name, n1, n2, nc.state ?? false)); break;
-            // ⚠️ TRANSISTOR FICTIF — interrupteur C-E commandé par V_BE
             case 'NPN_IDEAL': {
+                // Modele le transistor comme un interrupteur entre collecteur et emetteur.
                 const inpn = new IdealNpn(
                     nc.name,
                     parseInt(nc.nb), parseInt(nc.nc), parseInt(nc.ne),
@@ -60,8 +59,8 @@ function buildComponents(netlist: any[]): Component[] {
     return out;
 }
 
-// ── Mise à jour des états LED ────────────────────────────────────────────────
 function updateLedStates(netlist: any[], nodeVoltages: Record<string, number>): boolean {
+    // Allume une LED si sa tension directe depasse son seuil.
     let changed = false;
     for (const nc of netlist) {
         if (nc.type !== 'D') continue;
@@ -76,9 +75,8 @@ function updateLedStates(netlist: any[], nodeVoltages: Record<string, number>): 
     return changed;
 }
 
-// ── Mise à jour des transistors fictifs (NPN_IDEAL) ──────────────────────────
-// ⚠️ TRANSISTOR FICTIF — pas de simulation réelle, juste V_BE > seuil → ON
 function updateIdealNpnStates(netlist: any[], nodeVoltages: Record<string, number>): boolean {
+    // Active le transistor si Vbe depasse le seuil choisi.
     let changed = false;
     for (const nc of netlist) {
         if (nc.type !== 'NPN_IDEAL') continue;
@@ -93,8 +91,8 @@ function updateIdealNpnStates(netlist: any[], nodeVoltages: Record<string, numbe
     return changed;
 }
 
-// ── Boucle de simulation ──────────────────────────────────────────────────────
 function runChunk() {
+    // Calcule un petit bloc, puis relance la boucle apres une pause.
     if (!running) return;
 
     try {
@@ -129,7 +127,7 @@ function runChunk() {
 
             let changed = updateLedStates(latestNetlist, result.nodeVoltages);
             changed     = updateIdealNpnStates(latestNetlist, result.nodeVoltages) || changed;
-            if (!changed) break; // convergé
+            if (!changed) break; // Les etats sont stables.
         }
 
         if (result.timeSeries && result.timeSeries.length > 0) {

@@ -1,8 +1,6 @@
 import { Component, StampContext } from './Component';
 
-// Un switch c'est simplement une résistance qui change de valeur.
-// Fermé  → résistance quasi nulle  → le courant passe librement
-// Ouvert → résistance quasi infinie → plus rien ne passe
+// Un interrupteur est une resistance qui change selon son etat.
 export class Switch extends Component {
     closed: boolean;
 
@@ -16,8 +14,7 @@ export class Switch extends Component {
     }
 
     stamp({ G, nodeIndexMap }: StampContext): void {
-        // fermé = 0.001 ohm (quasi un fil)
-        // ouvert = 1 000 000 000 ohm (quasi l'air)
+        // Ferme, il laisse passer le courant. Ouvert, il bloque presque tout.
         const resistance = this.closed ? 0.001 : 1e9;
         const g = 1 / resistance;
 

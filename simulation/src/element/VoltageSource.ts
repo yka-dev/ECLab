@@ -1,5 +1,6 @@
 import { Component, StampContext } from './Component';
 
+// Une source de tension impose une difference de potentiel entre deux noeuds.
 export class VoltageSource extends Component {
     voltage: number;
     private mnaRow: number | null = null;

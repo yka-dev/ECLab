@@ -1,6 +1,7 @@
 import { Component, StampContext } from './Component';
 
 
+// Une source de courant injecte un courant fixe entre deux noeuds.
 export class CurrentSource extends Component {
     current: number;
 
@@ -13,7 +14,7 @@ export class CurrentSource extends Component {
         const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
         const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
 
-        // le courant sort de node1 et entre dans node2
+        // Le courant sort de node1 et entre dans node2.
         if (node1Index !== null) {
             b.set(node1Index, 0, b.get(node1Index, 0) - this.current);
         }

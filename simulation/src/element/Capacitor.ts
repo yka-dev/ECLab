@@ -1,5 +1,6 @@
 import { Component, StampContext } from './Component';
 
+// Un condensateur ajoute sa capacite dans la matrice C.
 export class Capacitor extends Component {
     capacitance: number;
 
