@@ -1,47 +1,90 @@
-import { Component, StampContext } from './Component';
+import { Component, StampContext } from "./Component";
 
+// Une DEL (LED) est approximée ici par un modele lineaire simple :
+// une source de tension Vf (tension de seuil) en serie avec
+// une petite resistance Rs.
+//
+// Ce modele ne reproduit pas exactement le comportement non lineaire
+// d'une vraie diode, mais il est suffisant pour une simulation simple.
+//
+// Equivalent du modele :
+//   anode ──[ Rs ]──(+ Vf -)── cathode
+//
+// La resistance contribue a G, tandis que la tension de seuil
+// contribue au vecteur b.
 export class Led extends Component {
-    forwardVoltage: number;
-    seriesResistance: number;
-    color: string;
+  tensionSeuil: number;
+  resistanceSerie: number;
+  couleur: string;
 
-    constructor(
-        id: string,
-        node1: number,
-        node2: number,
-        forwardVoltage: number,
-        color: string = 'inconnu',
-        seriesResistance: number = 10
-    ) {
-        super(id, node1, node2);
-        this.forwardVoltage = forwardVoltage;
-        this.color = color;
-        this.seriesResistance = seriesResistance;
+  constructor(
+    id: string,
+    noeud1: number,
+    noeud2: number,
+    tensionSeuil: number,
+    couleur: string = "inconnu",
+    resistanceSerie: number = 10,
+  ) {
+    super(id, noeud1, noeud2);
+    this.tensionSeuil = tensionSeuil;
+    this.couleur = couleur;
+    this.resistanceSerie = resistanceSerie;
+  }
+
+  // Estampille la resistance serie dans G et la tension
+  // de seuil dans le vecteur b.
+  stamp({ G, b, nodeIndexMap }: StampContext): void {
+    const indexNoeud1 = this.getNodeIndex(this.node1, nodeIndexMap);
+    const indexNoeud2 = this.getNodeIndex(this.node2, nodeIndexMap);
+    const conductance = 1 / this.resistanceSerie;
+
+    // Contribution de la resistance serie Rs.
+    if (indexNoeud1 !== null) {
+      G.set(
+        indexNoeud1,
+        indexNoeud1,
+        G.get(indexNoeud1, indexNoeud1) + conductance,
+      );
     }
 
-    stamp({ G, b, nodeIndexMap }: StampContext): void {
-        const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
-        const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
-        const g = 1 / this.seriesResistance; // 1/Rs
-
-        // ── Résistance série Rs entre anode (n1) et cathode (n2) ──────────────
-        if (node1Index !== null) {
-            G.set(node1Index, node1Index, G.get(node1Index, node1Index) + g);
-        }
-        if (node2Index !== null) {
-            G.set(node2Index, node2Index, G.get(node2Index, node2Index) + g);
-        }
-        if (node1Index !== null && node2Index !== null) {
-            G.set(node1Index, node2Index, G.get(node1Index, node2Index) - g);
-            G.set(node2Index, node1Index, G.get(node2Index, node1Index) - g);
-        }
-
-
-        if (node1Index !== null) {
-            b.set(node1Index, 0, b.get(node1Index, 0) + g * this.forwardVoltage);
-        }
-        if (node2Index !== null) {
-            b.set(node2Index, 0, b.get(node2Index, 0) - g * this.forwardVoltage);
-        }
+    if (indexNoeud2 !== null) {
+      G.set(
+        indexNoeud2,
+        indexNoeud2,
+        G.get(indexNoeud2, indexNoeud2) + conductance,
+      );
     }
+
+    if (indexNoeud1 !== null && indexNoeud2 !== null) {
+      G.set(
+        indexNoeud1,
+        indexNoeud2,
+        G.get(indexNoeud1, indexNoeud2) - conductance,
+      );
+
+      G.set(
+        indexNoeud2,
+        indexNoeud1,
+        G.get(indexNoeud2, indexNoeud1) - conductance,
+      );
+    }
+
+    // Ajoute la tension de seuil Vf dans b.
+    // La DEL impose une chute de tension de l'anode vers la cathode.
+    if (indexNoeud1 !== null) {
+      b.set(
+        indexNoeud1,
+        0,
+        b.get(indexNoeud1, 0) + conductance * this.tensionSeuil,
+      );
+    }
+
+    if (indexNoeud2 !== null) {
+      b.set(
+        indexNoeud2,
+        0,
+        b.get(indexNoeud2, 0) - conductance * this.tensionSeuil,
+      );
+    }
+  }
 }

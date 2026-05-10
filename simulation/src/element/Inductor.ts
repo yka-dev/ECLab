@@ -1,40 +1,53 @@
-import { Component, StampContext } from './Component';
+import { Component, StampContext } from "./Component";
 
-
+// Un inducteur stocke de l'energie dans un champ magnetique et
+// s'oppose aux variations brusques de courant.
+//
+// Equation physique :
+//   v = L * di/dt
+//
+// En MNA, un inducteur ajoute une inconnue supplementaire :
+// le courant qui le traverse. On lui reserve donc une ligne MNA,
+// comme pour une source de tension.
+//
+// La matrice G relie ce courant aux tensions des noeuds,
+// tandis que C contient l'inductance pour representer
+// la dynamique temporelle du composant.
 export class Inductor extends Component {
-    inductance: number;
-    private mnaRow: number | null = null;
+  inductance: number;
+  private ligneMna: number | null = null;
 
-    constructor(id: string, node1: number, node2: number, inductance: number) {
-        super(id, node1, node2);
-        this.inductance = inductance;
+  constructor(id: string, noeud1: number, noeud2: number, inductance: number) {
+    super(id, noeud1, noeud2);
+    this.inductance = inductance;
+  }
+
+  setLigneMna(ligne: number): void {
+    this.ligneMna = ligne;
+  }
+
+  // Estampille les contraintes reliant le courant de l'inducteur
+  // aux tensions des noeuds, puis ajoute L dans C.
+  stamp({ G, C, nodeIndexMap }: StampContext): void {
+    if (this.ligneMna === null) {
+      throw new Error(`L'inducteur ${this.id} n'a pas de ligne MNA assignée.`);
     }
 
-    setMnaRow(row: number): void {
-        this.mnaRow = row;
+    const indexNoeud1 = this.getNodeIndex(this.node1, nodeIndexMap);
+    const indexNoeud2 = this.getNodeIndex(this.node2, nodeIndexMap);
+
+    if (indexNoeud1 !== null) {
+      G.set(indexNoeud1, this.ligneMna, 1);
+      G.set(this.ligneMna, indexNoeud1, 1);
     }
 
-    stamp({ G, C, nodeIndexMap }: StampContext): void {
-        if (this.mnaRow === null) {
-            throw new Error(`L'inducteur ${this.id} n'a pas de ligne MNA assignée.`);
-        }
-
-        const node1Index = this.getNodeIndex(this.node1, nodeIndexMap);
-        const node2Index = this.getNodeIndex(this.node2, nodeIndexMap);
-
-        // relie le courant de l'inducteur aux tensions des nodes (comme VoltageSource)
-        if (node1Index !== null) {
-            G.set(node1Index, this.mnaRow, 1);
-            G.set(this.mnaRow, node1Index, 1);
-        }
-
-        if (node2Index !== null) {
-            G.set(node2Index, this.mnaRow, -1);
-            G.set(this.mnaRow, node2Index, -1);
-        }
-
-        // l'inductance va dans C — c'est elle qui donne la dynamique temporelle
-        // v = L * di/dt  →  avec backward euler : L/dt dans la matrice C
-        C.set(this.mnaRow, this.mnaRow, this.inductance);
+    if (indexNoeud2 !== null) {
+      G.set(indexNoeud2, this.ligneMna, -1);
+      G.set(this.ligneMna, indexNoeud2, -1);
     }
+
+    // L'inductance est ajoutee dans C pour modeliser
+    // le terme temporel de l'equation v = L * di/dt.
+    C.set(this.ligneMna, this.ligneMna, this.inductance);
+  }
 }

@@ -22,36 +22,34 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Les dépendances globales sont déclarées ici pour être accessibles
+// par toutes les fonctions auxiliaires (login, logout, etc.).
 var Env env.Env
 var DB db.DB
 var Email email.Email
 
 func main() {
-	// Charge les variables d'environnement depuis .env (si présent)
+	// godotenv.Load() est tolérant à l'absence du fichier .env (utile en production
+	// où les variables sont injectées directement dans l'environnement du processus).
 	godotenv.Load()
 
-	// Initialise la configuration (Env) depuis l'environnement
 	Env, err := env.InitEnv()
 	if err != nil {
-		log.Fatal("Failed to load environment variables: ", err)
-		return
+		log.Fatal("Impossible de charger les variables d'environnement : ", err)
 	}
 
-	// Connexion à la base de données
 	DB, err = db.New(Env.DATABASE_URL)
 	if err != nil {
-		log.Fatal("Failed to connect to database: ", err)
-		return
+		log.Fatal("Impossible de se connecter a la base de donnees : ", err)
 	}
 	defer DB.Close()
 
-	// Initialise le client email (ex: Brevo)
 	Email = email.New(Env.BREVO_API_KEY)
 
-	log.Println(Env)
-
-	// Configure le routeur HTTP et CORS
 	router := chi.NewRouter()
+
+	// CORS permissif : autorise toutes les origines et methodes.
+	// A restreindre en production selon les domaines autorisés.
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://*", "https://*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -61,217 +59,232 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	// Représentation simple des payloads d'auth
-	type AuthRequest struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
+	registerAuthRoutes(router)
+	registerProjectRoutes(router)
 
-	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Tout est marche"))
+	log.Printf("Serveur en ecoute sur le port %s\n", Env.PORT)
+	if err := http.ListenAndServe(Env.PORT, routeur); err != nil {
+		log.Fatal("Erreur au demarrage du serveur : ", err)
+	}
+}
+
+// RequeteAuth represente le corps JSON attendu pour la connexion et l'inscription.
+type AuthRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// registerAuthRoutes regroupe toutes les routes liees a l'authentification.
+// Les séparer de main() améliore la lisibilité et facilite les tests.
+func registerAuthRoutes(r chi.Router) {
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("OK"))
 	})
 
-	router.Delete("/auth", func(w http.ResponseWriter, r *http.Request) {
+	// Deconnexion : invalide la session et efface le cookie cote client.
+	r.Delete("/auth", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
-			log.Printf("Logout failed, invalid session: %s\n", err)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			log.Printf("Deconnexion echouee, session invalide : %s\n", err)
+			http.Error(w, "Non autorise", http.StatusUnauthorized)
 			return
 		}
-
-		cookie := logout(r.Context(), session)
-
-		http.SetCookie(w, cookie)
+		http.SetCookie(w, logout(r.Context(), session))
 		w.WriteHeader(http.StatusOK)
 	})
 
-	router.Post("/auth/*", func(w http.ResponseWriter, r *http.Request) {
-		var request AuthRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			log.Printf("Failed to decode auth request body: %s\n", err)
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+	// Route unifiee pour /auth/login et /auth/signup.
+	// Le chemin determine l'action a effectuer.
+	r.Post("/auth/*", func(w http.ResponseWriter, r *http.Request) {
+		var req AuthRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("Corps de la requete auth invalide : %s\n", err)
+			http.Error(w, "Corps de la requete invalide", http.StatusBadRequest)
 			return
 		}
 
-		// Validation et normalisation de l'email
-		email, err := validateEmail(request.Email)
+		email, err := validateEmail(req.Email)
 		if err != nil {
-			log.Printf("Invalid email address %q: %s\n", request.Email, err)
-			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			log.Printf("Adresse courriel invalide %q : %s\n", req.Email, err)
+			http.Error(w, "Adresse courriel invalide", http.StatusBadRequest)
 			return
 		}
 
-		// Validation du mot de passe (longueur minimale)
-		password, err := validatePassword(request.Password)
+		password, err := validatePassword(req.Password)
 		if err != nil {
-			log.Printf("Invalid password: %s\n", err)
-			http.Error(w, "Invalid password", http.StatusBadRequest)
+			log.Printf("Mot de passe invalide : %s\n", err)
+			http.Error(w, "Mot de passe invalide", http.StatusBadRequest)
 			return
 		}
 
-		cookie := &http.Cookie{}
-		// Détermine l'action selon le chemin (login vs signup)
-		if strings.Contains(r.URL.Path, "login") {
+		var cookie *http.Cookie
+		path := r.URL.Path
+
+		switch {
+		case strings.Contains(path, "login"):
 			cookie, err = login(r.Context(), email, password)
 			if err != nil {
-				log.Printf("Login failed for %q: %s\n", email, err)
-				http.Error(w, "Invalid credentials", http.StatusInternalServerError)
+				log.Printf("Connexion echouee pour %q : %s\n", email, err)
+				http.Error(w, "Identifiants invalides", http.StatusUnauthorized)
 				return
 			}
-		} else if strings.Contains(r.URL.Path, "signup") {
+		case strings.Contains(path, "signup"):
 			cookie, err = signup(r.Context(), email, password)
 			if err != nil {
-				log.Printf("Signup failed for %q: %s\n", email, err)
-				http.Error(w, "Failed to signup", http.StatusUnauthorized)
+				log.Printf("Inscription echouee pour %q : %s\n", email, err)
+				http.Error(w, "Echec de l'inscription", http.StatusInternalServerError)
 				return
 			}
+		default:
+			http.Error(w, "Action non reconnue", http.StatusNotFound)
+			return
 		}
 
 		http.SetCookie(w, cookie)
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Route pour demander un email de réinitialisation (forgot password)
-	router.Post("/auth/forgot", func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
+	// Etape 1 du flux "mot de passe oublie" : genere un token et envoie un email.
+	r.Post("/auth/forgot", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
 			Email string `json:"email"`
 		}
-
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			log.Printf("Failed to decode request body: %s\n", err)
-			http.Error(w, "Invalid input", http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("Corps de la requete forgot invalide : %s\n", err)
+			http.Error(w, "Donnees invalides", http.StatusBadRequest)
 			return
 		}
 
-		email, err := validateEmail(request.Email)
+		email, err := validateEmail(req.Email)
 		if err != nil {
-			log.Printf("Invalid email address %q: %s\n", request.Email, err)
-			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			log.Printf("Adresse courriel invalide %q : %s\n", req.Email, err)
+			http.Error(w, "Adresse courriel invalide", http.StatusBadRequest)
 			return
 		}
 
 		user, err := DB.GetUserByEmail(r.Context(), email)
 		if err != nil {
-			log.Printf("User not found for email %q: %s\n", email, err)
-			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			// On renvoie une erreur generique pour ne pas révéler si l'email existe.
+			log.Printf("Aucun utilisateur pour le courriel %q : %s\n", email, err)
+			http.Error(w, "Adresse courriel invalide", http.StatusBadRequest)
 			return
 		}
 
-		// Crée une requête de réinitialisation en base (avec date d'expiration)
-		newRequest, err := DB.CreateRequest(r.Context(), repositery.CreateRequestParams{
+		// Le token de réinitialisation est stocke en base avec une expiration de 3 heures.
+		newReq, err := DB.CreateRequest(r.Context(), repositery.CreateRequestParams{
 			Type:      repositery.RequestsTypeResetPassword,
 			UserID:    user.ID,
-			ExpiresAt: time.Now().Add(time.Hour * 3), // Expires in 3 hours
+			ExpiresAt: time.Now().Add(3 * time.Hour),
 		})
 		if err != nil {
-			log.Printf("Failed to create password reset request for user %d: %s\n", user.ID, err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			log.Printf("Echec de creation de la requete de reinitialisation pour l'utilisateur %d : %s\n", user.ID, err)
+			http.Error(w, "Erreur interne du serveur", http.StatusInternalServerError)
 			return
 		}
 
-		// Envoie l'email de réinitialisation contenant un lien avec le token
-		if err := Email.SendPasswordResetEmail(r.Context(), user.Email, fmt.Sprintf("%s/reset-password?token=%s", Env.URL, newRequest.ID)); err != nil {
-			log.Printf("Failed to send password reset email : %s\n", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		resetLink := fmt.Sprintf("%s/reset-password?token=%s", Env.URL, newReq.ID)
+		if err := Email.SendPasswordResetEmail(r.Context(), user.Email, resetLink); err != nil {
+			log.Printf("Echec de l'envoi de l'email de reinitialisation : %s\n", err)
+			http.Error(w, "Erreur interne du serveur", http.StatusInternalServerError)
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Route pour appliquer la réinitialisation du mot de passe
-	router.Post("/auth/reset", func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
+	// Etape 2 du flux "mot de passe oublie" : valide le token et applique le nouveau mot de passe.
+	r.Post("/auth/reset", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
 			RequestID   uuid.UUID `json:"request_id"`
 			NewPassword string    `json:"new_password"`
 		}
-
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			log.Printf("Failed to parse request body: %s\n", err)
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("Corps de la requete reset invalide : %s\n", err)
+			http.Error(w, "Corps de la requete invalide", http.StatusBadRequest)
 			return
 		}
 
-		newPassword, err := validateEmail(request.NewPassword)
+		// Note : validerMotDePasse est appele ici, validerCourriel etait un bug dans l'original.
+		newPassword, err := validatePassword(req.NewPassword)
 		if err != nil {
-			log.Printf("Invalid new password: %s\n", err)
+			log.Printf("Nouveau mot de passe invalide : %s\n", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		newRequest, err := DB.GetRequestByID(r.Context(), request.RequestID)
+		resetReq, err := DB.GetRequestByID(r.Context(), req.RequestID)
 		if err != nil {
-			log.Printf("Password reset request %s not found: %s\n", request.RequestID, err)
-			http.Error(w, "The password reset request does not exist", http.StatusNotFound)
+			log.Printf("Demande de reinitialisation %s introuvable : %s\n", req.RequestID, err)
+			http.Error(w, "La demande de reinitialisation n'existe pas", http.StatusNotFound)
 			return
 		}
 
-		// Vérifie l'expiration du token
-		if newRequest.ExpiresAt.Before(time.Now()) {
-			log.Printf("Password reset request %s has expired\n", request.RequestID)
-			DB.DeleteRequestByID(r.Context(), request.RequestID)
-			http.Error(w, "The request has expired", http.StatusRequestTimeout)
+		// On vérifie l'expiration avant le type pour échouer rapidement et nettoyer la base.
+		if resetReq.ExpiresAt.Before(time.Now()) {
+			log.Printf("Demande de reinitialisation %s expiree\n", req.RequestID)
+			DB.DeleteRequestByID(r.Context(), req.RequestID)
+			http.Error(w, "La demande a expire", http.StatusRequestTimeout)
 			return
 		}
 
-		if newRequest.Type != repositery.RequestsTypeResetPassword {
-			log.Printf("Invalid request type %q for request %s\n", newRequest.Type, request.RequestID)
-			http.Error(w, "Invalid request", http.StatusForbidden)
+		if resetReq.Type != repositery.RequestsTypeResetPassword {
+			log.Printf("Type de demande invalide %q pour la requete %s\n", resetReq.Type, req.RequestID)
+			http.Error(w, "Demande invalide", http.StatusForbidden)
 			return
 		}
 
-		// Met à jour le mot de passe utilisateur
-		newPasswordHash, err := hashPassword(newPassword)
+		passwordHash, err := hashPassword(newPassword)
 		if err != nil {
-			log.Printf("Failed to hash new password : %s\n", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			log.Printf("Echec du hachage du mot de passe : %s\n", err)
+			http.Error(w, "Erreur interne du serveur", http.StatusInternalServerError)
 			return
 		}
 
 		if err := DB.UpdateUserPassword(r.Context(), repositery.UpdateUserPasswordParams{
-			ID:           newRequest.UserID,
-			PasswordHash: newPasswordHash,
+			ID:           resetReq.UserID,
+			PasswordHash: passwordHash,
 		}); err != nil {
-			log.Printf("Failed to update user password: %s\n", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			log.Printf("Echec de la mise a jour du mot de passe : %s\n", err)
+			http.Error(w, "Erreur interne du serveur", http.StatusInternalServerError)
 			return
 		}
 
-		// Supprime toutes les sessions de l'utilisateur pour forcer la reconnexion
-		DB.DeleteSessionsByUserID(r.Context(), newRequest.UserID)
+		// On invalide toutes les sessions existantes pour forcer une reconnexion
+		// avec le nouveau mot de passe sur tous les appareils.
+		DB.DeleteSessionsByUserID(r.Context(), resetReq.UserID)
 
-		cookie := logout(r.Context(), nil)
-		http.SetCookie(w, cookie)
+		http.SetCookie(w, logout(r.Context(), nil))
 		w.WriteHeader(http.StatusOK)
 	})
+}
 
-	// CRUD projets : création et liste
-	router.Post("/project", func(w http.ResponseWriter, r *http.Request) {
+// registerProjectRoutes regroupe toutes les routes CRUD liees aux projets.
+func registerProjectRoutes(r chi.Router) {
+	// Création d'un projet pour l'utilisateur authentifie.
+	r.Post("/project", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
-			log.Printf("Unauthorized project creation attempt: %s\n", err)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			log.Printf("Tentative de creation de projet non autorisee : %s\n", err)
+			http.Error(w, "Non autorise", http.StatusUnauthorized)
 			return
 		}
 
-		var newProjectData struct {
+		var req struct {
 			Name string `json:"name"`
 		}
-
-		if err := json.NewDecoder(r.Body).Decode(&newProjectData); err != nil {
-			log.Printf("Failed to decode project creation payload: %s\n", err)
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("Corps du projet invalide : %s\n", err)
+			http.Error(w, "Corps de la requete invalide", http.StatusBadRequest)
 			return
 		}
 
 		project, err := DB.CreateProject(r.Context(), repositery.CreateProjectParams{
-			Name:   newProjectData.Name,
+			Name:   req.Name,
 			UserID: session.UserID,
 		})
-
 		if err != nil {
-			log.Printf("Failed to create project for user %d: %s\n", session.UserID, err)
-			http.Error(w, "Failed to create project", http.StatusInternalServerError)
+			log.Printf("Echec de la creation du projet pour l'utilisateur %d : %s\n", session.UserID, err)
+			http.Error(w, "Echec de la creation du projet", http.StatusInternalServerError)
 			return
 		}
 
@@ -279,18 +292,19 @@ func main() {
 		json.NewEncoder(w).Encode(project)
 	})
 
-	router.Get("/projects", func(w http.ResponseWriter, r *http.Request) {
-		session, err := getSessionFromRequest(r)
+	// Liste tous les projets appartenant a l'utilisateur authentifie.
+	r.Get("/projects", func(w http.ResponseWriter, r *http.Request) {
+		session, err := obtenirSessionDepuisRequete(r)
 		if err != nil {
-			log.Println(err)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			log.Printf("Acces non autorise a la liste des projets : %s\n", err)
+			http.Error(w, "Non autorise", http.StatusUnauthorized)
 			return
 		}
 
 		projects, err := DB.GetProjectsByUserID(r.Context(), session.UserID)
 		if err != nil {
-			log.Printf("Failed to get projects for user %d: %s\n", session.UserID, err)
-			http.Error(w, "Failed to get projects", http.StatusInternalServerError)
+			log.Printf("Echec de la recuperation des projets pour l'utilisateur %d : %s\n", session.UserID, err)
+			http.Error(w, "Echec de la recuperation des projets", http.StatusInternalServerError)
 			return
 		}
 
@@ -298,20 +312,21 @@ func main() {
 		json.NewEncoder(w).Encode(projects)
 	})
 
-	// Routes pour manipuler un projet par id (GET/DELETE/PATCH)
-	router.HandleFunc("/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
+	// Route generique pour GET / DELETE / PATCH sur un projet identifie par son ID.
+	// Un seul handler evite la duplication de la logique d'authentification et de parsing d'ID.
+	r.HandleFunc("/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
-			log.Printf("Unauthorized access to project: %s\n", err)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			log.Printf("Acces non autorise au projet : %s\n", err)
+			http.Error(w, "Non autorise", http.StatusUnauthorized)
 			return
 		}
 
 		idStr := chi.URLParam(r, "id")
 		projectID, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			log.Printf("Invalid project id %q: %s\n", idStr, err)
-			http.Error(w, "Invalid project id", http.StatusBadRequest)
+			log.Printf("ID de projet invalide %q : %s\n", idStr, err)
+			http.Error(w, "ID de projet invalide", http.StatusBadRequest)
 			return
 		}
 
@@ -321,141 +336,117 @@ func main() {
 				ID:     projectID,
 				UserID: session.UserID,
 			})
-
 			if err != nil {
-				log.Printf("Failed to get project %d for user %d: %s\n", projectID, session.UserID, err)
-				http.Error(w, "Failed to get project", http.StatusInternalServerError)
+				log.Printf("Echec de la recuperation du projet %d pour l'utilisateur %d : %s\n", projectID, session.UserID, err)
+				http.Error(w, "Echec de la recuperation du projet", http.StatusInternalServerError)
 				return
 			}
-
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(project)
+
 		case http.MethodDelete:
-			err = DB.DeleteProjectByID(r.Context(), repositery.DeleteProjectByIDParams{
+			if err := DB.DeleteProjectByID(r.Context(), repositery.DeleteProjectByIDParams{
 				ID:     projectID,
 				UserID: session.UserID,
-			})
-
-			if err != nil {
-				log.Printf("Failed to delete project %d for user %d: %s\n", projectID, session.UserID, err)
-				http.Error(w, "Failed to delete project", http.StatusInternalServerError)
+			}); err != nil {
+				log.Printf("Echec de la suppression du projet %d pour l'utilisateur %d : %s\n", projectID, session.UserID, err)
+				http.Error(w, "Echec de la suppression du projet", http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
+
 		case http.MethodPatch:
-			var updateProjectData struct {
+			var req struct {
 				Name string `json:"name"`
 			}
-
-			if err := json.NewDecoder(r.Body).Decode(&updateProjectData); err != nil {
-				log.Printf("Failed to decode project update payload: %s\n", err)
-				http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				log.Printf("Corps de mise a jour du projet invalide : %s\n", err)
+				http.Error(w, "Corps de la requete invalide", http.StatusBadRequest)
 				return
 			}
-
-			err = DB.UpdateProjectByID(r.Context(), repositery.UpdateProjectByIDParams{
+			if err := DB.UpdateProjectByID(r.Context(), repositery.UpdateProjectByIDParams{
 				ID:     projectID,
-				Name:   updateProjectData.Name,
+				Name:   req.Name,
 				UserID: session.UserID,
-			})
-
-			if err != nil {
-				log.Printf("Failed to update project %d for user %d: %s\n", projectID, session.UserID, err)
-				http.Error(w, "Failed to update project", http.StatusInternalServerError)
+			}); err != nil {
+				log.Printf("Echec de la mise a jour du projet %d pour l'utilisateur %d : %s\n", projectID, session.UserID, err)
+				http.Error(w, "Echec de la mise a jour du projet", http.StatusInternalServerError)
 				return
 			}
-
 			w.WriteHeader(http.StatusOK)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
 
+		default:
+			http.Error(w, "Methode non autorisee", http.StatusMethodNotAllowed)
+		}
 	})
 
-	// Mettre à jour le circuit d'un projet
-	router.Post("/projects/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
+	// Mise a jour du schema de circuit (donnees JSON libres) d'un projet.
+	r.Post("/projects/circuit/{id}", func(w http.ResponseWriter, r *http.Request) {
 		session, err := getSessionFromRequest(r)
 		if err != nil {
-			log.Printf("Unauthorized circuit update attempt: %s\n", err)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			log.Printf("Tentative de mise a jour du circuit non autorisee : %s\n", err)
+			http.Error(w, "Non autorise", http.StatusUnauthorized)
 			return
 		}
 
-		var updateProjectCircuitData struct {
+		var req struct {
 			Circuit json.RawMessage `json:"circuit"`
 		}
-
-		if err := json.NewDecoder(r.Body).Decode(&updateProjectCircuitData); err != nil {
-			log.Printf("Failed to decode circuit update payload: %s\n", err)
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("Corps de la mise a jour du circuit invalide : %s\n", err)
+			http.Error(w, "Corps de la requete invalide", http.StatusBadRequest)
 			return
 		}
 
 		idStr := chi.URLParam(r, "id")
-
 		projectID, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			log.Printf("Invalid project id %q: %s\n", idStr, err)
-			http.Error(w, "Invalid project id", http.StatusBadRequest)
+			log.Printf("ID de projet invalide %q : %s\n", idStr, err)
+			http.Error(w, "ID de projet invalide", http.StatusBadRequest)
 			return
 		}
 
-		err = DB.UpdateProjectCircuitByID(r.Context(), repositery.UpdateProjectCircuitByIDParams{
+		if err := DB.UpdateProjectCircuitByID(r.Context(), repositery.UpdateProjectCircuitByIDParams{
 			ID:      projectID,
-			Circuit: updateProjectCircuitData.Circuit,
+			Circuit: req.Circuit,
 			UserID:  session.UserID,
-		})
-
-		if err != nil {
-			log.Printf("Failed to update circuit for project %d, user %d: %s\n", projectID, session.UserID, err)
-			http.Error(w, "Failed to update project circuit", http.StatusInternalServerError)
+		}); err != nil {
+			log.Printf("Echec de la mise a jour du circuit pour le projet %d, utilisateur %d : %s\n", projectID, session.UserID, err)
+			http.Error(w, "Echec de la mise a jour du circuit", http.StatusInternalServerError)
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
 	})
-
-	// Démarrage du serveur HTTP
-	fmt.Printf("Starting server on port %s\n", Env.PORT)
-	http.ListenAndServe(Env.PORT, router)
 }
 
-// signup crée un nouvel utilisateur puis retourne un cookie de session.
+// signup cree un nouvel utilisateur en base, puis l'authentifie immediatement.
 func signup(ctx context.Context, email string, password string) (*http.Cookie, error) {
-	hashedPassword, err := hashPassword(password)
+	passwordHash, err := hashPassword(password)
 	if err != nil {
-		log.Println(err)
-		return nil, fmt.Errorf("failed to hash password")
+		return nil, fmt.Errorf("echec du hachage du mot de passe : %w", err)
 	}
 
-	_, err = DB.CreateUser(ctx, repositery.CreateUserParams{
+	if _, err = DB.CreateUser(ctx, repositery.CreateUserParams{
 		Email:        email,
-		PasswordHash: hashedPassword,
-	})
-	if err != nil {
-		log.Println(err)
-		return nil, fmt.Errorf("failed to create user")
+		PasswordHash: passwordHash,
+	}); err != nil {
+		return nil, fmt.Errorf("echec de la creation de l'utilisateur : %w", err)
 	}
 
-	cookie, err := login(ctx, email, password)
-	if err != nil {
-		log.Println(err)
-		return nil, fmt.Errorf("failed to login after registration")
-	}
-
-	return cookie, nil
+	// On connecte directement l'utilisateur apres inscription pour eviter une etape supplementaire.
+	return login(ctx, email, password)
 }
 
-// login valide les identifiants, crée une session en base et retourne un cookie.
+// login verifie les identifiants, cree une session valide 7 jours et retourne le cookie.
 func login(ctx context.Context, email string, password string) (*http.Cookie, error) {
 	user, err := DB.GetUserByEmail(ctx, email)
 	if err != nil {
-		log.Println(err)
-		return nil, fmt.Errorf("invalid credentials")
+		return nil, fmt.Errorf("identifiants invalides")
 	}
 
-	if !comparePasswords(password, user.PasswordHash) {
-		return nil, fmt.Errorf("invalid credentials")
+	if !compareHashAndPassword(password, user.PasswordHash) {
+		return nil, fmt.Errorf("identifiants invalides")
 	}
 
 	session, err := DB.CreateSession(ctx, repositery.CreateSessionParams{
@@ -463,79 +454,83 @@ func login(ctx context.Context, email string, password string) (*http.Cookie, er
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	})
 	if err != nil {
-		log.Println(err)
-		return nil, fmt.Errorf("failed to create session")
+		return nil, fmt.Errorf("echec de la creation de la session : %w", err)
 	}
 
 	return createAuthCookie(session.ID.String(), session.ExpiresAt), nil
 }
 
-// logout supprime la session fournie (si présente) et retourne un cookie expiré.
+// logout supprime la session en base si elle existe, puis retourne un cookie expire
+// pour que le navigateur efface immediatement le cookie cote client.
 func logout(ctx context.Context, session *repositery.Session) *http.Cookie {
 	if session != nil {
 		DB.DeleteSessionByID(ctx, session.ID)
 	}
-	cookie := createAuthCookie("", time.Now().Add(-time.Hour))
-
-	return cookie
+	return createAuthCookie("", time.Now().Add(-time.Hour))
 }
 
-// createAuthCookie génère un cookie de session avec la valeur et la date d'expiration fournies.
-func createAuthCookie(value string, expiresAt time.Time) *http.Cookie {
+// createAuthCookie construit le cookie de session avec les attributs de securite requis.
+// HttpOnly empeche l'acces via JavaScript. Secure force HTTPS. SameSiteNone permet
+// les requetes cross-site (necessaire si le frontend est sur un domaine different).
+func createAuthCookie(valeur string, expiration time.Time) *http.Cookie {
 	return &http.Cookie{
 		Name:     "eclab_session_id",
-		Value:    value,
+		Value:    valeur,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteNoneMode,
-		Expires:  expiresAt,
+		Expires:  expiration,
 	}
 }
 
-// hashPassword génère un hash bcrypt pour un mot de passe en clair.
-func hashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	return string(bytes), err
+// hashPassword genere un hash bcrypt avec le cout par defaut.
+// bcrypt inclut le sel automatiquement dans le hash resultant.
+func hashPassword(motDePasse string) (string, error) {
+	octets, err := bcrypt.GenerateFromPassword([]byte(motDePasse), bcrypt.DefaultCost)
+	return string(octets), err
 }
 
-// comparePasswords compare un mot de passe en clair avec son hash bcrypt.
-func comparePasswords(password string, hashedPassword string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
-	return err == nil
+// compareHashAndPassword verifie si un mot de passe en clair correspond a son hash bcrypt.
+// Le retour booleen simplifie les conditions d'appel.
+func compareHashAndPassword(password string, passwordHash string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)) == nil
 }
 
-// validateEmail vérifie la validité d'une adresse email et la normalise.
+// validateEmail parse l'adresse via la bibliotheque standard (RFC 5322)
+// et la normalise en minuscules sans espaces superflus.
 func validateEmail(email string) (string, error) {
-	_, err := mail.ParseAddress(email)
-	if err != nil {
+	if _, err := mail.ParseAddress(courriel); err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(strings.ToLower(email)), nil
+	return strings.TrimSpace(strings.ToLower(courriel)), nil
 }
 
-// validatePassword applique des règles simples sur le mot de passe (longueur minimale).
+// validatePassword applique les regles minimales de securite sur le mot de passe.
 func validatePassword(password string) (string, error) {
 	if len(password) < 8 {
-		return "", fmt.Errorf("password must be at least 8 characters long")
+		return "", fmt.Errorf("le mot de passe doit contenir au moins 8 caracteres")
 	}
 	return strings.TrimSpace(password), nil
 }
 
-// getSessionFromRequest récupère la session à partir du cookie de la requête et la valide en base.
+// getSessionFromRequest extrait l'ID de session du cookie, puis valide
+// la session en base. Retourne une erreur si le cookie est absent ou la session invalide.
 func getSessionFromRequest(r *http.Request) (*repositery.Session, error) {
 	cookie, err := r.Cookie("eclab_session_id")
 	if err != nil {
-		return nil, fmt.Errorf("session cookie not found")
+		return nil, fmt.Errorf("cookie de session absent")
 	}
 
 	sessionID, err := uuid.Parse(cookie.Value)
 	if err != nil {
-		return nil, fmt.Errorf("invalid session ID")
+		return nil, fmt.Errorf("ID de session invalide")
 	}
+
 	session, err := DB.GetSessionByID(r.Context(), sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid session")
+		return nil, fmt.Errorf("session invalide")
 	}
+
 	return &session, nil
 }
