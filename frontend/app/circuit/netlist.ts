@@ -4,6 +4,9 @@ import { snap, dist } from "./utils";
 import { termWorlds } from "./geometry";
 import { fmtOhm, fmtFarad, fmtHenry } from "./utils";
 
+// Les fonctions se trouvant dans se fichier ont été généré par IA.
+// Ces fonctions scannent le circuit afin de detecter les noeux pour generer le Netlist qui sera ensuite utilise dans la simulation
+
 export type NetlistComponent =
   | { type: "R"; name: string; n1: string; n2: string; value: number }
   | { type: "V"; name: string; n1: string; n2: string; value: number }
@@ -12,7 +15,15 @@ export type NetlistComponent =
   | { type: "D"; name: string; n1: string; n2: string; vf: number }
   | { type: "S"; name: string; n1: string; n2: string; state: boolean }
   // Transistor simplifie avec base, collecteur et emetteur.
-  | { type: "NPN_IDEAL"; name: string; nb: string; nc: string; ne: string; vbe_on: number; ron: number };
+  | {
+      type: "NPN_IDEAL";
+      name: string;
+      nb: string;
+      nc: string;
+      ne: string;
+      vbe_on: number;
+      ron: number;
+    };
 
 export interface Netlist {
   nodes: string[];
@@ -24,7 +35,9 @@ export interface Netlist {
 
 class UnionFind {
   private parent = new Map<string, string>();
-  private key(p: Vec2): string { return `${snap(p.x)},${snap(p.y)}`; }
+  private key(p: Vec2): string {
+    return `${snap(p.x)},${snap(p.y)}`;
+  }
   add(p: Vec2): string {
     // Ajoute un point dans un groupe de connexion.
     const k = this.key(p);
@@ -42,8 +55,10 @@ class UnionFind {
   }
   union(a: Vec2, b: Vec2): void {
     // Fusionne deux points qui sont electriquement relies.
-    this.add(a); this.add(b);
-    const ra = this.find(a), rb = this.find(b);
+    this.add(a);
+    this.add(b);
+    const ra = this.find(a),
+      rb = this.find(b);
     if (ra !== rb) this.parent.set(ra, rb);
   }
 }
@@ -80,7 +95,9 @@ export function generateNetlist(circuit: Circuit): Netlist {
     }
   }
   if (groundRoots.size === 0)
-    warnings.push("Aucun composant de masse trouvé. Le nœud '0' ne sera pas défini.");
+    warnings.push(
+      "Aucun composant de masse trouvé. Le nœud '0' ne sera pas défini.",
+    );
 
   const rootToNode = new Map<string, string>();
   for (const gr of groundRoots) rootToNode.set(gr, "0");
@@ -114,19 +131,96 @@ export function generateNetlist(circuit: Circuit): Netlist {
       return name;
     };
     switch (comp.type) {
-      case "resistor": { const a = n1(), b = n2(); nlComps.push({ type: "R", name: reg("R", a, b), n1: a, n2: b, value: comp.props.resistance as number }); break; }
-      case "capacitor": { const a = n1(), b = n2(); nlComps.push({ type: "C", name: reg("C", a, b), n1: a, n2: b, value: comp.props.capacitance as number }); break; }
-      case "inductor": { const a = n1(), b = n2(); nlComps.push({ type: "L", name: reg("L", a, b), n1: a, n2: b, value: comp.props.inductance as number }); break; }
-      case "vsource": { const a = n1(), b = n2(); nlComps.push({ type: "V", name: reg("V", a, b), n1: a, n2: b, value: comp.props.voltage as number }); break; }
-      case "led": { const a = n1(), b = n2(); nlComps.push({ type: "D", name: reg("D", a, b), n1: a, n2: b, vf: comp.props.forwardVoltage as number }); break; }
-      case "switch": { const a = n1(), b = n2(); nlComps.push({ type: "S", name: reg("S", a, b), n1: a, n2: b, state: comp.props.closed as boolean }); break; }
-      case "npn_ideal": {
-        // Le NPN simplifie garde ses trois bornes dans la netlist.
-        const nb = n1(), nc = n2(), ne = n3();
-        nlComps.push({ type: "NPN_IDEAL", name: reg("Q", nb, nc, ne), nb, nc, ne, vbe_on: comp.props.vbe_on as number, ron: comp.props.ron as number });
+      case "resistor": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "R",
+          name: reg("R", a, b),
+          n1: a,
+          n2: b,
+          value: comp.props.resistance as number,
+        });
         break;
       }
-      case "ground": break;
+      case "capacitor": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "C",
+          name: reg("C", a, b),
+          n1: a,
+          n2: b,
+          value: comp.props.capacitance as number,
+        });
+        break;
+      }
+      case "inductor": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "L",
+          name: reg("L", a, b),
+          n1: a,
+          n2: b,
+          value: comp.props.inductance as number,
+        });
+        break;
+      }
+      case "vsource": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "V",
+          name: reg("V", a, b),
+          n1: a,
+          n2: b,
+          value: comp.props.voltage as number,
+        });
+        break;
+      }
+      case "led": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "D",
+          name: reg("D", a, b),
+          n1: a,
+          n2: b,
+          vf: comp.props.forwardVoltage as number,
+        });
+        break;
+      }
+      case "switch": {
+        const a = n1(),
+          b = n2();
+        nlComps.push({
+          type: "S",
+          name: reg("S", a, b),
+          n1: a,
+          n2: b,
+          state: comp.props.closed as boolean,
+        });
+        break;
+      }
+      case "npn_ideal": {
+        // Le NPN simplifie garde ses trois bornes dans la netlist.
+        const nb = n1(),
+          nc = n2(),
+          ne = n3();
+        nlComps.push({
+          type: "NPN_IDEAL",
+          name: reg("Q", nb, nc, ne),
+          nb,
+          nc,
+          ne,
+          vbe_on: comp.props.vbe_on as number,
+          ron: comp.props.ron as number,
+        });
+        break;
+      }
+      case "ground":
+        break;
     }
   }
 
@@ -134,21 +228,29 @@ export function generateNetlist(circuit: Circuit): Netlist {
     nc.type === "NPN_IDEAL" ? [nc.nb, nc.nc, nc.ne] : [nc.n1, nc.n2];
 
   const nodeSet = new Set<string>();
-  for (const nc of nlComps) ncNodes(nc).forEach(n => nodeSet.add(n));
+  for (const nc of nlComps) ncNodes(nc).forEach((n) => nodeSet.add(n));
 
   const nodeCount = new Map<string, number>();
   for (const nc of nlComps)
-    ncNodes(nc).forEach(n => nodeCount.set(n, (nodeCount.get(n) ?? 0) + 1));
+    ncNodes(nc).forEach((n) => nodeCount.set(n, (nodeCount.get(n) ?? 0) + 1));
   // Un noeud avec une seule connexion risque de flotter.
   for (const [node, count] of nodeCount)
-    if (count < 2) warnings.push(`Le nœud ${node} semble flottant (1 seule connexion).`);
+    if (count < 2)
+      warnings.push(`Le nœud ${node} semble flottant (1 seule connexion).`);
 
   const nodes = Array.from(nodeSet).sort((a, b) => {
-    const na = parseInt(a), nb = parseInt(b);
+    const na = parseInt(a),
+      nb = parseInt(b);
     return isNaN(na) || isNaN(nb) ? a.localeCompare(b) : na - nb;
   });
 
-  return { nodes, components: nlComps, warnings, componentNodes, componentNames };
+  return {
+    nodes,
+    components: nlComps,
+    warnings,
+    componentNodes,
+    componentNames,
+  };
 }
 
 export function netlistToString(netlist: Netlist): string {
@@ -156,14 +258,25 @@ export function netlistToString(netlist: Netlist): string {
   const lines: string[] = [];
   for (const nc of netlist.components) {
     switch (nc.type) {
-      case "R": case "C": case "L": case "V":
-        lines.push(`${nc.name} ${nc.n1} ${nc.n2} ${nc.value}`); break;
+      case "R":
+      case "C":
+      case "L":
+      case "V":
+        lines.push(`${nc.name} ${nc.n1} ${nc.n2} ${nc.value}`);
+        break;
       case "D":
-        lines.push(`${nc.name} ${nc.n1} ${nc.n2} VF=${nc.vf}`); break;
+        lines.push(`${nc.name} ${nc.n1} ${nc.n2} VF=${nc.vf}`);
+        break;
       case "S":
-        lines.push(`${nc.name} ${nc.n1} ${nc.n2} ${nc.state ? "CLOSED" : "OPEN"}`); break;
+        lines.push(
+          `${nc.name} ${nc.n1} ${nc.n2} ${nc.state ? "CLOSED" : "OPEN"}`,
+        );
+        break;
       case "NPN_IDEAL":
-        lines.push(`${nc.name} NPN_IDEAL b=${nc.nb} c=${nc.nc} e=${nc.ne} Vbe=${nc.vbe_on}V Ron=${nc.ron}Ω`); break;
+        lines.push(
+          `${nc.name} NPN_IDEAL b=${nc.nb} c=${nc.nc} e=${nc.ne} Vbe=${nc.vbe_on}V Ron=${nc.ron}Ω`,
+        );
+        break;
     }
   }
   if (netlist.warnings.length > 0) {
@@ -176,12 +289,19 @@ export function netlistToString(netlist: Netlist): string {
 export function fmtNetlistComp(nc: NetlistComponent): string {
   // Resume une ligne de netlist pour l'interface.
   switch (nc.type) {
-    case "R": return `${nc.name} — ${fmtOhm(nc.value)}`;
-    case "C": return `${nc.name} — ${fmtFarad(nc.value)}`;
-    case "L": return `${nc.name} — ${fmtHenry(nc.value)}`;
-    case "V": return `${nc.name} — ${nc.value}V`;
-    case "D": return `${nc.name} — DEL ${nc.vf}V`;
-    case "S": return `${nc.name} — ${nc.state ? UI.closed : UI.open}`;
-    case "NPN_IDEAL": return `${nc.name} — NPN idéal`;
+    case "R":
+      return `${nc.name} — ${fmtOhm(nc.value)}`;
+    case "C":
+      return `${nc.name} — ${fmtFarad(nc.value)}`;
+    case "L":
+      return `${nc.name} — ${fmtHenry(nc.value)}`;
+    case "V":
+      return `${nc.name} — ${nc.value}V`;
+    case "D":
+      return `${nc.name} — DEL ${nc.vf}V`;
+    case "S":
+      return `${nc.name} — ${nc.state ? UI.closed : UI.open}`;
+    case "NPN_IDEAL":
+      return `${nc.name} — NPN idéal`;
   }
 }
