@@ -9,10 +9,12 @@ export function computeCircuitCurrents(
   liveNetlist: Netlist,
   simResult: SimResult,
 ): CircuitCurrents {
+  // Calcule des courants approximatifs pour l'affichage.
   const { componentNodes, componentNames } = liveNetlist;
 
   const componentCurrents = new Map<string, number>();
   for (const comp of circuit.components) {
+    // On utilise la tension aux bornes pour chaque composant simple.
     const nodes = componentNodes.get(comp.id);
     if (!nodes) continue;
     const [n1, n2] = nodes;
@@ -23,20 +25,20 @@ export function computeCircuitCurrents(
       case "resistor": I = (v1 - v2) / ((comp.props.resistance as number) || 1); break;
       case "switch":   I = (comp.props.closed as boolean) ? (v1 - v2) / 0.001 : 0; break;
       case "vsource": {
-        // Convention MNA : J < 0 pour source fournissant du courant → on l'utilise sans négation
+        // Convention MNA: le courant de source vient directement du solveur.
         const name = componentNames.get(comp.id);
         I = name ? (simResult.sourceCurrents[name] ?? 0) : 0;
         break;
       }
       case "led": {
         const vf = comp.props.forwardVoltage as number;
-        const rs = 10; // seriesResistance dans Led.ts
+        const rs = 10; // Meme resistance serie que dans le modele LED.
         const raw = (v1 - v2 - vf) / rs;
         I = raw > 0 ? raw : 0;
         break;
       }
       case "npn_ideal":
-        I = 0; // composant 3 bornes — courant de branche non calculable depuis [n1,n2]
+        I = 0; // Trois bornes, donc pas de courant simple entre deux noeuds.
         break;
       default:
         I = 0;
@@ -44,9 +46,9 @@ export function computeCircuitCurrents(
     componentCurrents.set(comp.id, I);
   }
 
-  // ── Passe 1 : fils touchant une borne de composant ────────────────────────
   const wireCurrents = new Map<string, number>();
   for (const wire of circuit.wires) {
+    // Un fil recupere le courant du composant branche a son extremite.
     let bestCurrent = 0, bestMag = 0;
     const firstPt = wire.points[0];
     const lastPt  = wire.points[wire.points.length - 1];
@@ -74,7 +76,7 @@ export function computeCircuitCurrents(
     wireCurrents.set(wire.id, bestCurrent);
   }
 
-  // ── Passe 2 : propagation BFS aux fils intermédiaires ────────────────────
+  // Propage ensuite ce courant aux fils voisins.
   const wireById = new Map(circuit.wires.map(w => [w.id, w]));
   const seeded   = new Set<string>();
   for (const [id, c] of wireCurrents) { if (Math.abs(c) > 1e-9) seeded.add(id); }

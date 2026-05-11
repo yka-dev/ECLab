@@ -1,10 +1,12 @@
 import type { ComponentType, ComponentPropertySchema } from "./types";
 
+// Valeurs partagees par l'editeur de circuit.
 export const GRID = 24;
 export const ZOOM_MIN = 0.12;
 export const ZOOM_MAX = 6;
 export const THEME_STORAGE_KEY = "circuit-sandbox-theme";
 
+// Textes affiches dans l'interface.
 export const UI = {
   appTitle: "CIRCUIT",
   sandboxTitle: "CIRCUIT SANDBOX",
@@ -79,7 +81,7 @@ export const PROP_SCHEMAS: Record<ComponentType, ComponentPropertySchema> = {
     color: { label: "Couleur DEL", type: "select", default: "rouge", options: ["rouge", "vert", "bleu", "jaune", "blanc"] },
     forwardVoltage: { label: "Tension seuil Vf (V)", type: "number", default: 2.0, min: 0, step: 0.1 },
   },
-  // ⚠️ TRANSISTOR FICTIF — pas de vraie simulation
+  // Transistor simplifie pour les circuits logiques.
   npn_ideal: {
     vbe_on: { label: "Seuil Vbe (V)",   type: "number", default: 0.7, min: 0,   step: 0.05 },
     ron:    { label: "Ron passant (Ω)", type: "number", default: 10,  min: 0.1, step: 1    },
@@ -87,12 +89,14 @@ export const PROP_SCHEMAS: Record<ComponentType, ComponentPropertySchema> = {
 };
 
 export function defaultPropsFromSchema(schema: ComponentPropertySchema): Record<string, unknown> {
+  // Recupere les valeurs par defaut depuis le schema.
   return Object.fromEntries(Object.entries(schema).map(([k, f]) => [k, f.default]));
 }
 
 export const colSel = "#2563eb";
 export const colHov = "#7c3aed";
 
+// Groupes utilises dans la palette de gauche.
 export const PALETTE_GROUPS: { label: string; items: ComponentType[] }[] = [
   { label: UI.passive,    items: ["resistor", "capacitor", "inductor"] },
   { label: UI.sources,    items: ["vsource", "ground"] },

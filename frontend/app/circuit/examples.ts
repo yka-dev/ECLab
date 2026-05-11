@@ -1,7 +1,8 @@
 import type { Component, ExampleCircuit } from "./types";
 
+// Circuits prets a charger dans l'editeur.
 export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
-  // ── 1. Résistances en série ─────────────────────────────────────────────
+  // Resistances en serie.
   {
     label: "Résistances en série — division de tension",
     circuit: {
@@ -19,7 +20,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 2. Résistances en parallèle ─────────────────────────────────────────
+  // Resistances en parallele.
   {
     label: "Résistances en parallèle — division de courant",
     circuit: {
@@ -35,7 +36,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 3. Circuit RC — charge rapide (τ = 10 ms) ───────────────────────────
+  // Circuit RC avec une charge rapide.
   {
     label: "Circuit RC — charge rapide (τ = 10 ms)",
     circuit: {
@@ -55,7 +56,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 4. Circuit RL — montée du courant (τ = 0.1 ms) ──────────────────────
+  // Circuit RL avec montee du courant.
   {
     label: "Circuit RL — montée du courant (τ = 0.1 ms)",
     circuit: {
@@ -75,7 +76,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 5. Circuit RC avec switch — charge lente (τ = 1 s) ──────────────────
+  // Circuit RC avec interrupteur.
   {
     label: "Circuit RC avec switch — charge lente (τ = 1 s)",
     circuit: {
@@ -95,7 +96,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 6. Circuit multi-switch — deux branches contrôlées ──────────────────
+  // Deux branches controlees par interrupteurs.
   {
     label: "Circuit multi-switch — branches contrôlées",
     circuit: {
@@ -117,7 +118,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 7. Circuit RLC — oscillations amorties ──────────────────────────────
+  // Circuit RLC pour voir les oscillations.
   {
     label: "Circuit RLC — oscillations amorties",
     circuit: {
@@ -139,7 +140,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 8. LED + Interrupteur ────────────────────────────────────────────────
+  // LED avec interrupteur.
   {
     label: "LED + Interrupteur",
     circuit: {
@@ -159,8 +160,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 9. Porte AND — deux NPN en série ────────────────────────────────────
-  // Fermez SW_A ET SW_B pour allumer la LED rouge.
+  // Porte AND avec deux NPN en serie.
   {
     label: "Porte AND — 2 NPN en série (SW_A ET SW_B)",
     circuit: {
@@ -187,8 +187,7 @@ export const EXAMPLE_CIRCUITS: ExampleCircuit[] = [
       ],
     },
   },
-  // ── 10. Porte OR — deux NPN en parallèle ────────────────────────────────
-  // Fermez SW_A OU SW_B (ou les deux) pour allumer la LED rouge.
+  // Porte OR avec deux NPN en parallele.
   {
     label: "Porte OR — 2 NPN en parallèle (SW_A OU SW_B)",
     circuit: {

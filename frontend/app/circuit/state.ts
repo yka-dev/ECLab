@@ -2,14 +2,16 @@ import type { AppState, Action, HistoryEntry, Rotation } from "./types";
 import { THEME_STORAGE_KEY } from "./constants";
 
 export function readPersistedTheme(): boolean {
+  // Recupere le theme sauvegarde, si le navigateur le permet.
   try {
     const v = localStorage.getItem(THEME_STORAGE_KEY);
     if (v === "dark") return true;
     if (v === "light") return false;
-  } catch { /* SSR */ }
+  } catch {}
   return false;
 }
 
+// Etat de depart de l'editeur.
 export const initialState: AppState = {
   components: [],
   wires: [],
@@ -27,18 +29,21 @@ export const initialState: AppState = {
 };
 
 function cloneCircuit(s: AppState) {
+  // Copie le circuit pour eviter de modifier l'historique.
   return {
     components: JSON.parse(JSON.stringify(s.components)),
     wires: JSON.parse(JSON.stringify(s.wires)),
   };
 }
 function cloneEntry(e: HistoryEntry) {
+  // Copie une entree d'historique avant de la restaurer.
   return {
     components: JSON.parse(JSON.stringify(e.components)),
     wires: JSON.parse(JSON.stringify(e.wires)),
   };
 }
 function pushHistory(state: AppState): AppState {
+  // Ajoute une nouvelle version du circuit dans undo redo.
   const entry = cloneCircuit(state);
   const history = [...state.history.slice(0, state.historyIdx + 1), entry];
   if (history.length > 80) history.shift();
@@ -46,6 +51,7 @@ function pushHistory(state: AppState): AppState {
 }
 
 export function reducer(state: AppState, action: Action): AppState {
+  // Centralise toutes les modifications de l'etat.
   switch (action.type) {
     case "SET_TOOL":
       return { ...state, tool: action.tool, placingType: action.placingType ?? null, wirePoints: [], selection: [], ghostPos: null };

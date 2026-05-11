@@ -11,6 +11,7 @@ export function renderCanvas(
   hoverId: string | null,
   dragBox: DragBox | null,
 ): void {
+  // Redessine toute la toile a partir de l'etat courant.
   const W = ctx.canvas.width / (window.devicePixelRatio || 1);
   const H = ctx.canvas.height / (window.devicePixelRatio || 1);
   const dark = state.darkMode;
@@ -26,6 +27,7 @@ export function renderCanvas(
   ctx.fillRect(0, 0, W, H);
 
   if (state.showGrid) {
+    // Dessine seulement la partie visible de la grille.
     const tl = s2w(0, 0, cam), br = s2w(W, H, cam);
     const startX = Math.floor(tl.x / GRID) * GRID, startY = Math.floor(tl.y / GRID) * GRID;
     ctx.lineWidth = 0.5;
@@ -42,6 +44,7 @@ export function renderCanvas(
   }
 
   for (const wire of state.wires) {
+    // Dessine les fils avant les composants.
     const sel = state.selection.includes(wire.id);
     const hov = hoverId === wire.id;
     ctx.strokeStyle = sel ? colSel : hov ? colHov : wireCol;
@@ -55,6 +58,7 @@ export function renderCanvas(
   }
 
   for (const comp of state.components) {
+    // Chaque composant connait sa propre fonction de dessin.
     const def = COMPONENT_DEFS[comp.type];
     if (!def) continue;
     const sel = state.selection.includes(comp.id);
@@ -62,6 +66,7 @@ export function renderCanvas(
     const sp  = w2s(comp.position.x, comp.position.y, cam);
 
     if (sel) {
+      // Encadre le composant selectionne.
       const ts = termWorlds(comp);
       const allX = [comp.position.x, ...ts.map((t) => t.x)];
       const allY = [comp.position.y, ...ts.map((t) => t.y)];
@@ -80,6 +85,7 @@ export function renderCanvas(
     ctx.restore();
 
     for (const t of termWorlds(comp)) {
+      // Affiche les bornes pour aider au raccordement.
       const ts = w2s(t.x, t.y, cam);
       ctx.beginPath(); ctx.arc(ts.x, ts.y, 3.5, 0, Math.PI * 2);
       ctx.fillStyle = sel ? "rgba(37,99,235,.8)" : hov ? "rgba(124,58,237,.6)" : termAlpha;
@@ -88,12 +94,14 @@ export function renderCanvas(
   }
 
   for (const j of findJunctions(state.components, state.wires)) {
+    // Un point plein montre une vraie jonction electrique.
     const js = w2s(j.x, j.y, cam);
     ctx.beginPath(); ctx.arc(js.x, js.y, 4.5 * cam.z, 0, Math.PI * 2);
     ctx.fillStyle = juncCol; ctx.fill();
   }
 
   if (state.tool === "wire" && state.wirePoints.length > 0) {
+    // Apercu du fil pendant sa creation.
     const endPt = snapToNearby(state.components, state.wires, state.mouseWorld);
     const chain = [...state.wirePoints, endPt];
     ctx.strokeStyle = "rgba(37,99,235,.75)"; ctx.lineWidth = 2;
@@ -116,6 +124,7 @@ export function renderCanvas(
   }
 
   if (state.tool === "place" && state.ghostPos && state.placingType) {
+    // Apercu du composant avant de le placer.
     const def = COMPONENT_DEFS[state.placingType];
     const sp = w2s(state.ghostPos.x, state.ghostPos.y, cam);
     ctx.save();
@@ -131,6 +140,7 @@ export function renderCanvas(
   }
 
   if (dragBox) {
+    // Rectangle de selection multiple.
     const x = Math.min(dragBox.sx, dragBox.ex), y = Math.min(dragBox.sy, dragBox.ey);
     const w = Math.abs(dragBox.ex - dragBox.sx), h = Math.abs(dragBox.ey - dragBox.sy);
     ctx.fillStyle = "rgba(37,99,235,.07)"; ctx.fillRect(x, y, w, h);

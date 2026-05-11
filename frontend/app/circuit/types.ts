@@ -1,4 +1,4 @@
-// ─── Shared types for the circuit editor ─────────────────────────────────────
+// Types partages par l'editeur de circuit.
 
 export interface Vec2 { x: number; y: number; }
 export interface Terminal { x: number; y: number; }
@@ -9,6 +9,7 @@ export type ComponentType =
 
 export type Rotation = 0 | 90 | 180 | 270;
 
+// Composant place sur la toile.
 export interface Component {
   id: string;
   type: ComponentType;
@@ -20,6 +21,7 @@ export interface Component {
 export interface Wire { id: string; points: Vec2[]; }
 export interface Circuit { components: Component[]; wires: Wire[]; }
 
+// Resultats renvoyes par le worker de simulation.
 export interface SimPoint {
   time: number;
   nodeVoltages: Record<string, number>;
@@ -39,6 +41,7 @@ export interface GraphConfig {
   metric: "tension" | "courant";
 }
 
+// Champs configurables dans les proprietes d'un composant.
 export type PropFieldType = "number" | "boolean" | "select";
 interface PropFieldBase { label: string; type: PropFieldType; default: unknown; }
 export interface NumberField extends PropFieldBase { type: "number"; default: number; min?: number; step?: number; }
@@ -47,6 +50,7 @@ export interface SelectField extends PropFieldBase { type: "select"; default: st
 export type PropField = NumberField | BoolField | SelectField;
 export type ComponentPropertySchema = Record<string, PropField>;
 
+// Definition utilisee par le panneau de proprietes.
 export interface NumberPropDef { key: string; label: string; type: "number"; min?: number; step?: number; }
 export interface BoolPropDef   { key: string; label: string; type: "boolean"; }
 export interface SelectPropDef { key: string; label: string; type: "select"; options: string[]; }
@@ -69,6 +73,7 @@ export interface DragBox { sx: number; sy: number; ex: number; ey: number; }
 export type ToolMode = "select" | "wire" | "place";
 export interface HistoryEntry { components: Component[]; wires: Wire[]; }
 
+// Etat complet de l'editeur.
 export interface AppState {
   components: Component[];
   wires: Wire[];
@@ -85,6 +90,7 @@ export interface AppState {
   historyIdx: number;
 }
 
+// Actions envoyees au reducer.
 export type Action =
   | { type: "SET_TOOL"; tool: ToolMode; placingType?: ComponentType | null }
   | { type: "SET_MOUSE"; pos: Vec2 }
@@ -108,6 +114,7 @@ export interface MoveDrag { type: "move"; startWorld: Vec2; lastDx: number; last
 export interface BoxDrag  { type: "box"; startScreen: Vec2; }
 export type DragState = MoveDrag | BoxDrag;
 
+// Courants calcules pour l'affichage sur le schema.
 export interface CircuitCurrents {
   wireCurrents: Map<string, number>;
   componentCurrents: Map<string, number>;
@@ -115,4 +122,5 @@ export interface CircuitCurrents {
 
 export interface ExampleCircuit { label: string; circuit: Circuit; }
 
-// NetlistComponent and Netlist are exported from netlist.ts
+// Reexporte les types de netlist pour les composants qui lisent types.ts.
+export type { Netlist, NetlistComponent } from "./netlist";

@@ -4,6 +4,7 @@ import { dist, snap, snapVec } from "./utils";
 import { COMPONENT_DEFS } from "./componentDefs";
 
 export function termWorlds(comp: Component): Vec2[] {
+  // Calcule la position reelle des bornes apres rotation.
   const def = COMPONENT_DEFS[comp.type];
   if (!def) return [];
   const rad = (comp.rotation * Math.PI) / 180;
@@ -18,6 +19,7 @@ export function termWorlds(comp: Component): Vec2[] {
 }
 
 export function orthoRoute(a: Vec2, b: Vec2): Vec2[] {
+  // Cree un chemin horizontal puis vertical entre deux points.
   const pts: Vec2[] = [{ ...a }];
   if (a.x !== b.x) pts.push({ x: b.x, y: a.y });
   if (pts[pts.length - 1].x !== b.x || pts[pts.length - 1].y !== b.y)
@@ -32,6 +34,7 @@ export function snapToNearby(
   world: Vec2,
   radius = GRID * 0.85,
 ): Vec2 {
+  // Accroche le point a la grille, aux bornes ou aux fils proches.
   let best = radius, pt = snapVec(world);
   for (const c of components)
     for (const t of termWorlds(c)) {
@@ -47,6 +50,7 @@ export function snapToNearby(
 }
 
 export function hitComponent(comp: Component, pt: Vec2): boolean {
+  // Test simple avec une boite autour du composant.
   const ts = termWorlds(comp);
   const allX = [comp.position.x, ...ts.map((t) => t.x)];
   const allY = [comp.position.y, ...ts.map((t) => t.y)];
@@ -58,6 +62,7 @@ export function hitComponent(comp: Component, pt: Vec2): boolean {
 }
 
 export function hitWire(wire: Wire, pt: Vec2): boolean {
+  // Verifie si le point est assez proche d'un segment du fil.
   const ps = wire.points, thr = GRID * 0.42;
   for (let i = 0; i < ps.length - 1; i++) {
     const a = ps[i], b = ps[i + 1];
@@ -72,6 +77,7 @@ export function hitWire(wire: Wire, pt: Vec2): boolean {
 }
 
 export function hitTest(components: Component[], wires: Wire[], pt: Vec2): string | null {
+  // Cherche l'element sous la souris, du plus recent au plus ancien.
   for (let i = components.length - 1; i >= 0; i--)
     if (hitComponent(components[i], pt)) return components[i].id;
   for (let i = wires.length - 1; i >= 0; i--)
@@ -80,6 +86,7 @@ export function hitTest(components: Component[], wires: Wire[], pt: Vec2): strin
 }
 
 export function findJunctions(components: Component[], wires: Wire[]): Vec2[] {
+  // Trouve les points ou au moins trois connexions se rejoignent.
   const result: Vec2[] = [], candidates: Vec2[] = [];
   for (const c of components) for (const t of termWorlds(c)) candidates.push(t);
   for (const w of wires) {
@@ -95,5 +102,5 @@ export function findJunctions(components: Component[], wires: Wire[]): Vec2[] {
   return result;
 }
 
-// Re-export snap for use in netlist.ts
+// Reexporte snap pour netlist.ts.
 export { snap };

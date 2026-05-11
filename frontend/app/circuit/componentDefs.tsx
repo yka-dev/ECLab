@@ -2,6 +2,7 @@ import type { ComponentType, ComponentDef } from "./types";
 import { GRID, PROP_SCHEMAS, defaultPropsFromSchema, colSel, colHov } from "./constants";
 import { fmtOhm, fmtFarad, fmtHenry } from "./utils";
 
+// Definitions visuelles et reglages de chaque composant.
 export const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
   resistor: {
     label: "Résistance",
@@ -169,12 +170,12 @@ export const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
     },
   },
 
-  // ⚠️ TRANSISTOR FICTIF — interrupteur C-E commandé par V_BE, sans simulation réelle
+  // Transistor simplifie, utilise comme interrupteur dans la simulation.
   npn_ideal: {
     label: "NPN idéal ⚠",
     symbol: "Q",
     color: "#b45309",
-    // Base (gauche), Collecteur (haut-droite), Émetteur (bas-droite)
+    // Bornes dans l'ordre base, collecteur, emetteur.
     terminals: [{ x: -1, y: 0 }, { x: 1, y: -2 }, { x: 1, y: 2 }],
     defaultProps: defaultPropsFromSchema(PROP_SCHEMAS.npn_ideal),
     propDefs: [
@@ -182,27 +183,27 @@ export const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
       { key: "ron",    label: "Ron passant (Ω)", type: "number" as const, min: 0.1, step: 1    },
     ],
     draw(ctx, _comp, sel, hov) {
-      // ⚠️ TRANSISTOR FICTIF — dessin orange avec base pointillée pour signaler le modèle simplifié
+      // La base pointillee rappelle que le modele est simplifie.
       const col = sel ? colSel : hov ? colHov : "#b45309";
       ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = sel ? 2.5 : 2;
       const G = GRID;
 
-      // Fil de base — pointillé pour marquer "fictif"
+      // Fil de base pointille.
       ctx.save();
       ctx.setLineDash([3, 3]);
       ctx.beginPath(); ctx.moveTo(-G, 0); ctx.lineTo(-G * 0.3, 0); ctx.stroke();
       ctx.setLineDash([]); ctx.restore();
 
-      // Barre verticale de base
+      // Barre verticale de base.
       ctx.beginPath(); ctx.moveTo(-G * 0.3, -G * 1.2); ctx.lineTo(-G * 0.3, G * 1.2); ctx.stroke();
 
-      // Fil collecteur
+      // Fil du collecteur.
       ctx.beginPath(); ctx.moveTo(-G * 0.3, -G * 0.65); ctx.lineTo(G, -G * 2); ctx.stroke();
 
-      // Fil émetteur
+      // Fil de l'emetteur.
       ctx.beginPath(); ctx.moveTo(-G * 0.3, G * 0.65); ctx.lineTo(G, G * 2); ctx.stroke();
 
-      // Flèche émetteur
+      // Fleche de l'emetteur.
       const ex = G, ey = G * 2, sx = -G * 0.3, sy = G * 0.65;
       const len = Math.hypot(ex - sx, ey - sy);
       const ux = (ex - sx) / len, uy = (ey - sy) / len;
@@ -212,7 +213,7 @@ export const COMPONENT_DEFS: Record<ComponentType, ComponentDef> = {
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-G * 0.35, -G * 0.18); ctx.lineTo(-G * 0.35, G * 0.18); ctx.closePath(); ctx.fill();
       ctx.restore();
 
-      // Étiquettes
+      // Lettres des bornes.
       ctx.font = "bold 8px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
       ctx.fillText("B", -G * 1.4, G * 0.18);
       ctx.fillText("C", G * 1.35, -G * 1.9);
